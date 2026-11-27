@@ -1,0 +1,15 @@
+{
+  "name": "@jarvis/local",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "구글 드라이브 트랙(서버 없음): 서버 코드(apps/api)를 브라우저 안에서 그대로 돌리는 틀. 화면(apps/web)이 VITE_EDITION=local 일 때만 묶는다.",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --import tsx test/*.test.ts"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "0.5.16",
+    "buffer": "6.0.3"
+  }
+}

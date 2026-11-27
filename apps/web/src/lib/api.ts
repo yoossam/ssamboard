@@ -2,6 +2,20 @@ import type { AiStreamEvent } from '@jarvis/shared';
 import { useApp } from './store';
 
 // 서버와 주고받는 한 곳. 브라우저는 API 키·토큰·DB에 직접 닿지 않고 모두 이 경로를 거친다(6장).
+//
+// 두 트랙(docs/TWO_EDITIONS_PLAN.md): 화면은 `api`·`streamAi` 로만 부르고, 그 뒤에서 보내는 fetch 만 트랙마다 다르다.
+//   서버 트랙          — 브라우저 fetch 로 이 사이트의 /api 에 보낸다(아래 기본값).
+//   구글 드라이브 트랙 — 브라우저 안 작은 서버(apps/local, 서버 코드 그대로 + PGlite)의 fetch 를 setFetcher() 로 끼운다.
+// 화면 코드에 fetch('/api…')를 새로 쓰지 않는다. 지금 남은 예외 둘: AI 화면 틀 주소(board/view.tsx), 구글 로그인 넘기기(screens/Gate.tsx).
+
+type Fetcher = (input: string, init: RequestInit) => Promise<Response>;
+let send: Fetcher = (input, init) => fetch(input, init);
+/** 트랙에 맞는 fetch 를 끼운다. 앱이 시작할 때 한 번만 부른다. */
+export function setFetcher(next: Fetcher): void {
+  send = next;
+}
+
+export type AiMessageBody = { text: string; data?: string; context_block_ids?: string[]; conversation_id?: string; images?: { media_type: string; data: string }[]; files?: { name: string; data: string }[]; links?: string[] };
 
 export class ApiError extends Error {
   constructor(
@@ -44,7 +58,7 @@ async function request<T>(method: string, path: string, body?: unknown, signal?:
   }
   let res: Response;
   try {
-    res = await fetch(`/api${path}`, { method, headers, body: payload, credentials: 'same-origin', signal });
+    res = await send(`/api${path}`, { method, headers, body: payload, credentials: 'same-origin', signal });
   } catch (e) {
     if ((e as Error)?.name === 'AbortError') throw e;
     throw new ApiError('서버에 연결할 수 없습니다. 네트워크를 확인하세요.', 0);
@@ -67,14 +81,10 @@ export function errorMessage(e: unknown): string {
 }
 
 /** AI 창 입력. 응답은 SSE로 조금씩 온다(ONE-8). */
-export async function streamAi(
-  body: { text: string; data?: string; context_block_ids?: string[]; conversation_id?: string; images?: { media_type: string; data: string }[]; files?: { name: string; data: string }[]; links?: string[] },
-  onEvent: (event: AiStreamEvent) => void,
-  signal: AbortSignal,
-): Promise<void> {
+export async function streamAi(body: AiMessageBody, onEvent: (event: AiStreamEvent) => void, signal: AbortSignal): Promise<void> {
   let res: Response;
   try {
-    res = await fetch('/api/ai/messages', {
+    res = await send('/api/ai/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken(), Accept: 'text/event-stream' },
       body: JSON.stringify(body),

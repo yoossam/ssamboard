@@ -12,7 +12,7 @@
   },
   "scripts": {
     "build": "npm run build -w @jarvis/shared && npm run build -w @jarvis/api && npm run build -w @jarvis/web",
-    "test": "npm run build -w @jarvis/shared && npm test -w @jarvis/shared && npm test -w @jarvis/api",
+    "test": "npm run build -w @jarvis/shared && npm test -w @jarvis/shared && npm test -w @jarvis/api && npm test -w @jarvis/local",
     "dev:shared": "npm run dev -w @jarvis/shared",
     "dev:api": "npm run dev -w @jarvis/api",
     "dev:web": "npm run dev -w @jarvis/web",
@@ -20,7 +20,8 @@
     "dev:db": "npm start --prefix tools/dev-db",
     "migrate": "npm run migrate -w @jarvis/api",
     "reset-pin": "npm run reset-pin -w @jarvis/api --",
-    "typecheck": "npm run typecheck -w @jarvis/api && npm run typecheck -w @jarvis/web"
+    "typecheck": "npm run typecheck -w @jarvis/api && npm run typecheck -w @jarvis/web && npm run typecheck -w @jarvis/local",
+    "build:local": "npm run build -w @jarvis/shared && npm run build:local -w @jarvis/web"
   },
   "devDependencies": {
     "tsx": "^4.19.2",

@@ -7,6 +7,7 @@ import { MemoColorDots } from '../board/memo';
 import { BLOCK_ICON, Icon } from '../components/Icon';
 import { Button, ButtonRow, CountBadge, Empty, Field, IconButton, inputClass, Sheet, Tag, useIsPhone } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
+import { LOCAL_TRACK, localHandle } from '../lib/edition';
 import { queryClient, refresh, useBoard, useEvents, useNotifications, useTables, useTasks, useTrash } from '../lib/data';
 import { ago, isoToLocalInput, localInputToIso } from '../lib/format';
 import { useApp, type Panel } from '../lib/store';
@@ -62,6 +63,12 @@ function MorePanel() {
     markLocked('manual');
   };
   const logout = async () => {
+    // 구글 드라이브 트랙: 드라이브에 저장한 뒤 이 브라우저 자료를 지우고 처음 화면으로(저장 못 하면 멈추고 알린다).
+    const local = localHandle();
+    if (local) {
+      await local.signOut().catch((e: Error) => useApp.getState().toast(e.message, 'error'));
+      return;
+    }
     await api.post('/auth/logout').catch(() => undefined);
     queryClient.clear();
     useAi.getState().reset();
@@ -83,7 +90,7 @@ function MorePanel() {
             }}
           />
         )}
-        <Tile icon="lock" label="지금 잠그기" onClick={lock} />
+        {!LOCAL_TRACK && <Tile icon="lock" label="지금 잠그기" onClick={lock} />}
         <Tile icon="logout" label="로그아웃" onClick={logout} />
       </div>
       <p className="mt-3 truncate text-center text-xs text-sub">{email}</p>

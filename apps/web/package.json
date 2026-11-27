@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:local": "VITE_EDITION=local vite build",
+    "dev:local": "VITE_EDITION=local vite",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

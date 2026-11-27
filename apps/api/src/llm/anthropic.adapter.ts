@@ -136,7 +136,7 @@ export class AnthropicAdapter implements LlmAdapter {
     try {
       res = await fetch(`${config.anthropicBaseUrl}/v1/messages`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': API_VERSION },
+        headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': API_VERSION, ...(config.anthropicBrowserAccess ? { 'anthropic-dangerous-direct-browser-access': 'true' } : {}) },
         body: JSON.stringify(body),
         signal,
       });

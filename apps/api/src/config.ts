@@ -37,6 +37,8 @@ export const config = {
   uploadDir: env.UPLOAD_DIR ?? join(process.cwd(), 'data', 'uploads'),
   webDist: env.WEB_DIST ?? join(__dirname, '..', '..', 'web', 'dist'),
   anthropicBaseUrl: (env.ANTHROPIC_BASE_URL ?? 'https://api.anthropic.com').replace(/\/$/, ''),
+  /** 브라우저가 Claude 를 바로 부르는지(구글 드라이브 트랙만 참 — apps/local/src/shim/config.ts). 서버는 늘 거짓. */
+  anthropicBrowserAccess: false,
   /** 워커(알림·시트 동기화·휴지통 정리)를 이 프로세스에서 돌릴지 여부. */
   workerEnabled: (env.WORKER_ENABLED ?? 'true') === 'true',
 };

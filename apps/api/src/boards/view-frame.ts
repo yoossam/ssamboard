@@ -259,3 +259,80 @@ export function frameDocument(blockId: string, rev: string | undefined): string 
 </body>
 </html>`;
 }
+
+// ── 구글 드라이브 트랙(서버 없음)의 틀 ─────────────────────────────────────────────
+// 정적 페이지(GitHub Pages)라 응답 머리글로 정책·sandbox 를 줄 수 없다. 그래서 같은 준비 코드를 이렇게 감싼다(apps/local, board/view.tsx):
+//   보드 ── iframe(sandbox="allow-scripts", srcdoc: 이 문서) ── 일꾼(Worker, AI 코드)
+// - sandbox 속성으로 출처가 없는 격리 문서(서버 판의 CSP sandbox 와 같다).
+// - 문서 안 정책(meta)은 서버 판 viewCsp 와 같고, 스크립트는 빌드가 만든 view-inner.js 한 파일 주소만 허용한다.
+//   srcdoc 문서는 보드의 정책도 함께 물려받으므로 두 정책이 다 걸린다(더 좁은 쪽이 이긴다).
+// - 준비 코드(view-inner.js)는 서버 판 BOOTSTRAP 그대로이고, AI 의 code·css 만 보드가 처음 한 번 postMessage 로 넣는다(그 전에는 실행할 것이 없다).
+
+/** 빌드가 내보내는 준비 코드 파일 이름(apps/web/vite.config.ts 가 만든다). */
+export const LOCAL_VIEW_SCRIPT = 'view-inner.js';
+
+/** 구글 드라이브 트랙의 준비 코드: 보드가 code·css 를 넣어 주면 서버 판과 같은 준비 코드를 시작한다. */
+export function localViewBootstrap(): string {
+  const values: Record<string, string> = {
+    CODE: '__C',
+    CSS: '__S',
+    TAIL: lit(WORKER_TAIL),
+    KEEP: lit(VIEW_TAGS),
+    DROP: lit(VIEW_DROP_TAGS),
+    ATTR: lit(VIEW_ATTRS),
+    LIMIT: String(VIEW_RENDER_TIMEOUT_MS),
+    OUTMAX: String(VIEW_OUTPUT_MAX),
+    NODEMAX: String(VIEW_NODE_MAX),
+  };
+  const script = BOOTSTRAP.replace(/__(CODE|CSS|TAIL|KEEP|DROP|ATTR|LIMIT|OUTMAX|NODEMAX)__/g, (_m, key: string) => values[key]);
+  return `(function(){
+var started=false;
+function start(__C,__S){${script}}
+window.addEventListener('message',function(e){
+if(started||e.source!==window.top)return;
+var m=e.data;if(!m||m.type!=='ssam:code'||typeof m.code!=='string'||typeof m.css!=='string')return;
+started=true;start(m.code,m.css);
+});
+try{window.top.postMessage({type:'ssam:boot'},'*')}catch(e){}
+})();`;
+}
+
+/** 구글 드라이브 트랙 틀의 정책(문서 안 meta). 서버 판 viewCsp 에서 meta 로 줄 수 없는 것(sandbox·frame-ancestors)은 iframe 속성이 맡는다. */
+export function localViewCsp(scriptUrl: string): string {
+  return [
+    "default-src 'none'",
+    `script-src ${scriptUrl}`,
+    "script-src-attr 'none'",
+    "style-src 'unsafe-inline'",
+    'worker-src blob:',
+    'child-src blob:',
+    'img-src data: blob:',
+    'font-src data:',
+    "connect-src 'none'",
+    "frame-src 'none'",
+    "media-src 'none'",
+    "object-src 'none'",
+    "form-action 'none'",
+    "base-uri 'none'",
+  ].join('; ');
+}
+
+/** 구글 드라이브 트랙 틀 문서(srcdoc). scriptUrl 은 보드가 아는 view-inner.js 의 절대 주소. 글꼴은 기기 글꼴(망으로 부를 것이 없게). */
+export function localViewDocument(scriptUrl: string): string {
+  const safeUrl = scriptUrl.replace(/[^A-Za-z0-9:/._~%-]/g, '');
+  return `<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="${localViewCsp(safeUrl)}">
+<meta http-equiv="x-dns-prefetch-control" content="off">
+<meta name="referrer" content="no-referrer">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>${baseCss('')}</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="${safeUrl}"></script>
+</body>
+</html>`;
+}

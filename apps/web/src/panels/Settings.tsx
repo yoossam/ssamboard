@@ -3,6 +3,8 @@ import { LOCK_MINUTE_OPTIONS, PIN_LENGTH, type AuthStatus, type ConnectorDto, ty
 import { Icon } from '../components/Icon';
 import { Button, ButtonRow, Empty, Field, IconButton, inputClass, monoInput, Notice, PinField, Sheet, Tabs, Tag } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
+import { LOCAL_TRACK } from '../lib/edition';
+import { DriveTab } from '../local-shell/DriveTab';
 import { refresh, useConnectors, useSessions, useSettings } from '../lib/data';
 import { ago, count, shortWhen, usd } from '../lib/format';
 import { useApp, type SettingsTab } from '../lib/store';
@@ -13,7 +15,8 @@ import { useApp, type SettingsTab } from '../lib/store';
 function fail(e: unknown): void {
   useApp.getState().toast(errorMessage(e), 'error');
 }
-const pinReady = (pin: string) => pin.length === PIN_LENGTH;
+// 구글 드라이브 트랙에는 PIN 이 없다(문은 구글 로그인과 기기 잠금) — PIN 칸을 숨기고 늘 준비된 것으로 본다.
+const pinReady = (pin: string) => LOCAL_TRACK || pin.length === PIN_LENGTH;
 
 const TIMEZONES = ['Asia/Seoul', 'Asia/Tokyo', 'Asia/Shanghai', 'Asia/Singapore', 'Europe/London', 'Europe/Berlin', 'America/New_York', 'America/Los_Angeles', 'UTC'];
 
@@ -105,7 +108,7 @@ function GeneralTab({ settings }: { settings: SettingsDto }) {
               <Field label="새 API 키">
                 <input className={inputClass} type="password" autoComplete="off" placeholder="sk-ant-…" value={key} onChange={(e) => setKey(e.target.value)} />
               </Field>
-              <PinField value={pin} onChange={setPin} />
+              {!LOCAL_TRACK && <PinField value={pin} onChange={setPin} />}
             </div>
             <ButtonRow>
               <Button icon="close" disabled={busy} onClick={() => setEditKey(false)}>
@@ -117,7 +120,11 @@ function GeneralTab({ settings }: { settings: SettingsDto }) {
             </ButtonRow>
           </div>
         ) : (
-          <p className="mt-1 text-xs text-sub">키는 암호화해 서버에만 두고, 화면에는 끝 4자리만 보여 줍니다. AI 호출은 모두 서버를 거칩니다.</p>
+          <p className="mt-1 text-xs text-sub">
+            {LOCAL_TRACK
+              ? '키는 이 브라우저에만 두고 드라이브에도 올리지 않습니다. 다른 기기에서는 다시 넣어야 합니다. AI 요청은 이 브라우저가 Claude 에 바로 보냅니다.'
+              : '키는 암호화해 서버에만 두고, 화면에는 끝 4자리만 보여 줍니다. AI 호출은 모두 서버를 거칩니다.'}
+          </p>
         )}
       </div>
 
@@ -339,20 +346,26 @@ function ConnectTab() {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-2">
-        <PinField label="PIN 확인 (추가·해제할 때)" value={pin} onChange={setPin} />
-        <Field label="웹훅 이름">
-          <input className={inputClass} placeholder="예: 백업 서버" maxLength={40} value={hookName} onChange={(e) => setHookName(e.target.value)} />
-        </Field>
-      </div>
+      {/* 구글 드라이브 트랙: PIN 이 없고, 웹훅은 받아 줄 서버가 없어 숨긴다 */}
+      {!LOCAL_TRACK && (
+        <div className="grid grid-cols-2 gap-2">
+          <PinField label="PIN 확인 (추가·해제할 때)" value={pin} onChange={setPin} />
+          <Field label="웹훅 이름">
+            <input className={inputClass} placeholder="예: 백업 서버" maxLength={40} value={hookName} onChange={(e) => setHookName(e.target.value)} />
+          </Field>
+        </div>
+      )}
       <ButtonRow>
         <Button icon="sheet" disabled={busy || !pinReady(pin) || hasGoogle} onClick={() => add('google_sheets')}>
           Google 시트 연결
         </Button>
-        <Button icon="webhook" disabled={busy || !pinReady(pin)} onClick={() => add('webhook')}>
-          웹훅 추가
-        </Button>
+        {!LOCAL_TRACK && (
+          <Button icon="webhook" disabled={busy || !pinReady(pin)} onClick={() => add('webhook')}>
+            웹훅 추가
+          </Button>
+        )}
       </ButtonRow>
+      {LOCAL_TRACK && <p className="-mt-2 text-xs text-sub">구글 드라이브 트랙에서는 시트를 쌤보드를 연 동안에만, 아래 "지금 동기화"를 누를 때 맞춥니다. 다른 기기에서는 그 기기에서 다시 연결하세요.</p>}
       <p className="-mt-2 text-xs text-sub">로그인과 도구 권한은 따로입니다. Google 은 연결할 때 "선택한 파일과 이 앱이 만든 파일만" 권한을 추가로 동의받습니다. 시트는 읽기만 하고, 설문지는 AI에게 시켰을 때 승인을 거쳐 새로 만듭니다.</p>
 
       {created && (
@@ -431,6 +444,82 @@ function DevicesTab() {
   );
 }
 
+/**
+ * 자료 옮기기(서버 트랙): 보드 전체를 파일 하나로 받거나, 받아 둔 파일로 바꾼다. 구글 드라이브 트랙과 같은 파일 모양이라
+ * 두 트랙 사이를 오갈 수 있다(docs/TWO_EDITIONS_PLAN.md). 가져오기는 보드를 통째로 바꾸므로 PIN 을 다시 넣는다.
+ */
+function DataTab() {
+  const toast = useApp((s) => s.toast);
+  const [pin, setPin] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const download = async () => {
+    setBusy(true);
+    try {
+      const data = await api.get<unknown>('/data/export');
+      const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ssamboard-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const upload = async () => {
+    if (!file) return;
+    setBusy(true);
+    try {
+      let data: unknown;
+      try {
+        data = JSON.parse(await file.text());
+      } catch {
+        throw new Error('JSON 파일이 아닙니다.');
+      }
+      await api.post('/data/import', { pin, data });
+      await refresh();
+      setFile(null);
+      toast('파일의 자료로 보드를 바꿨습니다');
+    } catch (e) {
+      fail(e);
+    } finally {
+      setPin('');
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="space-y-4">
+      <div className="rounded-[10px] border p-3">
+        <span className="text-sm font-bold">내보내기</span>
+        <p className="mt-1 text-xs text-sub">보드 전체(블록·할 일·일정·표·메모·알림·AI 대화)를 파일 하나로 받습니다. Claude 열쇠·로그인 정보는 담지 않습니다. 구글 드라이브 트랙에서도 그대로 가져올 수 있습니다.</p>
+        <ButtonRow>
+          <Button icon="archive" disabled={busy} onClick={download}>
+            파일로 받기
+          </Button>
+        </ButtonRow>
+      </div>
+      <div className="rounded-[10px] border p-3">
+        <span className="text-sm font-bold">가져오기</span>
+        <p className="mt-1 text-xs text-sub">받아 둔 파일로 지금 보드를 통째로 바꿉니다. 지금 내용은 사라지니 먼저 내보내기를 해 두세요.</p>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <Field label="자료 파일">
+            <input className={inputClass} type="file" accept="application/json,.json" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+          </Field>
+          <PinField value={pin} onChange={setPin} />
+        </div>
+        <ButtonRow>
+          <Button icon="upload" tone="primary" disabled={busy || !file || !pinReady(pin)} onClick={upload}>
+            이 파일로 바꾸기
+          </Button>
+        </ButtonRow>
+      </div>
+    </div>
+  );
+}
+
 export function SettingsPanel({ initialTab }: { initialTab?: SettingsTab }) {
   const close = useApp((s) => s.close);
   const [tab, setTab] = useState<SettingsTab>(initialTab ?? 'general');
@@ -440,7 +529,7 @@ export function SettingsPanel({ initialTab }: { initialTab?: SettingsTab }) {
   useEffect(() => {
     const result = new URLSearchParams(window.location.search).get('connect');
     if (!result) return;
-    window.history.replaceState(null, '', '/');
+    window.history.replaceState(null, '', window.location.pathname);
     if (result === 'ok') useApp.getState().toast('Google 시트를 연결했습니다');
     else useApp.getState().toast(result === 'denied' ? '선택한 파일 권한에 동의해야 연결됩니다' : 'Google 시트를 연결하지 못했습니다', 'error');
   }, []);
@@ -450,24 +539,37 @@ export function SettingsPanel({ initialTab }: { initialTab?: SettingsTab }) {
       <Tabs
         value={tab}
         onChange={setTab}
-        tabs={[
-          { id: 'general', label: '일반', icon: 'settings' },
-          { id: 'security', label: '보안', icon: 'lock' },
-          { id: 'connect', label: '연결', icon: 'link' },
-          { id: 'devices', label: '기기', icon: 'device' },
-        ]}
+        tabs={
+          LOCAL_TRACK
+            ? [
+                { id: 'general', label: '일반', icon: 'settings' },
+                { id: 'drive', label: '드라이브', icon: 'save' },
+                { id: 'connect', label: '연결', icon: 'link' },
+              ]
+            : [
+                { id: 'general', label: '일반', icon: 'settings' },
+                { id: 'security', label: '보안', icon: 'lock' },
+                { id: 'connect', label: '연결', icon: 'link' },
+                { id: 'devices', label: '기기', icon: 'device' },
+                { id: 'data', label: '자료', icon: 'archive' },
+              ]
+        }
       />
       <div className="mt-4">
         {error ? (
           <Empty>{errorMessage(error)}</Empty>
         ) : !settings ? (
           <Empty>불러오는 중입니다</Empty>
-        ) : tab === 'general' ? (
+        ) : tab === 'general' || (LOCAL_TRACK && tab !== 'drive' && tab !== 'connect') ? (
           <GeneralTab settings={settings} />
+        ) : tab === 'drive' ? (
+          <DriveTab />
         ) : tab === 'security' ? (
           <SecurityTab settings={settings} />
         ) : tab === 'connect' ? (
           <ConnectTab />
+        ) : tab === 'data' ? (
+          <DataTab />
         ) : (
           <DevicesTab />
         )}

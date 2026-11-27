@@ -20,7 +20,7 @@ export type Panel =
   | { kind: 'task'; taskId?: string }
   | { kind: 'event'; eventId?: string };
 
-export type SettingsTab = 'general' | 'security' | 'connect' | 'devices';
+export type SettingsTab = 'general' | 'security' | 'connect' | 'devices' | 'drive' | 'data';
 export type AiLayout = 'modal' | 'panel';
 
 export interface Toast {

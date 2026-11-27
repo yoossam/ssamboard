@@ -4,6 +4,7 @@ import { readViewData, type BlockDto, type EventDto, type ViewData } from '@jarv
 import { Icon } from '../components/Icon';
 import { Empty } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
+import { LOCAL_TRACK, localHandle } from '../lib/edition';
 import { useQueryResult, useTable, useTasks } from '../lib/data';
 import { dayKey, timezone, zoneOffset } from '../lib/format';
 import { useApp } from '../lib/store';
@@ -33,6 +34,8 @@ function revOf(source: string): string {
 /** 바깥 틀(같은 출처의 빈 문서) 안에 든 안쪽 틀의 창. */
 function innerWindow(frame: HTMLIFrameElement | null): Window | null {
   try {
+    // 서버 트랙은 바깥 틀 안의 안쪽 틀, 구글 드라이브 트랙은 틀 하나(sandbox srcdoc)다.
+    if (LOCAL_TRACK) return frame?.contentWindow ?? null;
     return frame?.contentWindow?.frames[0] ?? null;
   } catch {
     return null;
@@ -86,6 +89,9 @@ export function ViewBody({ block }: { block: BlockDto }) {
   const payload = usePayload(spec);
   const rev = useMemo(() => revOf(`${code}\n/*css*/\n${css}`), [code, css]);
   const frame = useRef<HTMLIFrameElement>(null);
+  const codeRef = useRef({ code, css });
+  codeRef.current = { code, css };
+  const localDoc = useMemo(() => (LOCAL_TRACK ? (localHandle()?.viewDocument() ?? '') : ''), []);
   const [ready, setReady] = useState(false);
   const [problem, setProblem] = useState<{ kind: string; detail: string } | null>(null);
   // "LLM에 보내지 않음" 표의 자료로 그리는 화면이면, 코드가 알려 준 오류 글자는 AI에 붙이지 않는다(그 글자에 자료가 실려 있을 수 있다).
@@ -104,7 +110,9 @@ export function ViewBody({ block }: { block: BlockDto }) {
       if (!inner || e.source !== inner) return;
       const m = e.data as { type?: unknown; kind?: unknown; message?: unknown } | null;
       if (!m || typeof m !== 'object') return;
-      if (m.type === 'ssam:ready') setReady(true);
+      // 구글 드라이브 트랙: 틀이 떴다고 알리면 그때 AI 코드를 넣어 준다(코드는 문서에 적지 않는다).
+      if (m.type === 'ssam:boot' && LOCAL_TRACK) inner.postMessage({ type: 'ssam:code', code: codeRef.current.code, css: codeRef.current.css }, '*');
+      else if (m.type === 'ssam:ready') setReady(true);
       else if (m.type === 'ssam:drawn') setProblem(null);
       else if (m.type === 'ssam:error')
         setProblem({ kind: typeof m.kind === 'string' && m.kind in PROBLEM ? m.kind : 'threw', detail: typeof m.message === 'string' ? m.message.replace(/\s+/g, ' ').slice(0, 200) : '' });
@@ -134,7 +142,11 @@ export function ViewBody({ block }: { block: BlockDto }) {
   if (!code) return <Empty>화면이 비어 있습니다</Empty>;
   return (
     <div className="relative min-h-0 flex-1 bg-card">
-      <iframe ref={frame} key={rev} src={`/api/blocks/${block.id}/frame?rev=${rev}`} title={block.title} className="view-frame absolute inset-0 size-full border-0" />
+      {LOCAL_TRACK ? (
+        <iframe ref={frame} key={rev} sandbox="allow-scripts" referrerPolicy="no-referrer" srcDoc={localDoc} title={block.title} className="view-frame absolute inset-0 size-full border-0" />
+      ) : (
+        <iframe ref={frame} key={rev} src={`/api/blocks/${block.id}/frame?rev=${rev}`} title={block.title} className="view-frame absolute inset-0 size-full border-0" />
+      )}
       {payload.error && (
         <div className="absolute inset-0 flex items-center justify-center bg-card px-4 text-center text-sm text-sub">자료를 불러오지 못했습니다. {payload.error}</div>
       )}

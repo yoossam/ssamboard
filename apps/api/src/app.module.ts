@@ -16,6 +16,7 @@ import { ItemsService } from './items/items.service';
 import { LlmService } from './llm/llm.service';
 import { AiController, HealthController, NotificationsController, SettingsController, TrashController, UploadsController } from './misc.controllers';
 import { NotificationsService } from './notifications/notifications.service';
+import { DataController } from './data/data.controller';
 import { TablesController } from './tables/tables.controller';
 import { TablesService } from './tables/tables.service';
 import { UploadsService } from './uploads/uploads.service';
@@ -25,6 +26,7 @@ import { WorkerService } from './worker/worker.service';
 @Module({
   controllers: [
     HealthController,
+    DataController,
     AuthController,
     SessionsController,
     SettingsController,

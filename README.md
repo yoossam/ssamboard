@@ -10,9 +10,47 @@
 - AI 화면 블록: 표·할 일·일정을 그래프나 현황판으로 그려 보드에 붙입니다.
 - 첨부: 사진·PDF·한글(HWPX)·워드·엑셀·파워포인트 파일을 붙이거나, 공개된 구글 문서·시트 링크를 붙여 넣으면 AI 가 읽고 정리합니다.
 - 꾸미기: 블록을 끌어 옮기고 크기를 바꾸며, 블록 바탕·제목 색과 보드 바탕색을 바꿉니다.
-- 내 서버에 내 자료: 설치 하나에 사용자 한 명. 자료는 내 컴퓨터(서버)의 DB 에만 있고, AI 를 쓸 때만 필요한 부분이 Claude 로 갑니다.
+- 내 자료는 내 곳에: 사용자 한 명이 쓰는 보드입니다. 자료는 내 구글 드라이브나 내 서버에만 있고, AI 를 쓸 때만 필요한 부분이 Claude 로 갑니다.
 
-## 설치 (10분)
+## 두 가지 쓰는 법 — 고르세요
+
+| | 구글 드라이브 트랙 (설치 없음) | 서버 트랙 (내 서버) |
+|---|---|---|
+| 시작 | 주소를 열고 구글 로그인 → Claude 열쇠 넣기 | Docker 가 있는 컴퓨터에 `./scripts/install.sh` |
+| 자료가 있는 곳 | 내 브라우저 + 내 구글 드라이브의 숨은 앱 폴더(하루 백업 14개) | 내 서버의 데이터베이스 |
+| 다른 기기 | 같은 구글 계정으로 열면 같은 보드 | 내 서버 주소로 접속 |
+| 정해진 시각의 알림·시트 자동 맞춤 | 없음 — 시트는 "지금 동기화"로 | 늘(서버 일꾼) |
+| 구글 시트 가져오기·설문 만들기, 파일로 표 만들기, AI 화면 블록 | 됨 | 됨 |
+| 웹훅(바깥에서 알림 받기) | 없음(받아 줄 서버가 없다) | 됨 |
+| 인터넷 없이 열기 | 됨(앱 껍데기를 기억, 저장은 다시 연결되면) | 서버에 닿아야 함 |
+| 다른 트랙으로 옮기기 | 설정 → 드라이브 → 내보내기·가져오기 | 설정 → 자료 → 내보내기·가져오기 |
+| 누가 내 자료를 볼 수 있나 | 나만(서버가 없다) | 서버 관리자 |
+
+두 트랙은 **같은 코드**입니다. 서버 코드를 브라우저 안 PostgreSQL([PGlite](https://pglite.dev))에서 그대로 돌리는 방식이라, 기능을 고치면 두 트랙에 함께 들어갑니다(설계: `docs/TWO_EDITIONS_PLAN.md`).
+
+## 구글 드라이브 트랙
+
+이 저장소의 GitHub Pages 주소를 열면 바로 씁니다. "구글 계정으로 시작"을 누르고 드라이브 앱 폴더 권한에 동의하면 됩니다. 구글 없이 "이 기기에서만 써 보기"도 됩니다(나중에 설정 → 드라이브에서 옮기기).
+
+- 권한은 드라이브 **앱 폴더**(`drive.appdata`) 하나 — 쌤보드가 만든 숨은 파일만 읽고 쓰며, 내 드라이브의 다른 파일은 볼 수 없습니다.
+  시트·설문을 쓸 때만 설정 → 연결에서 `drive.file`(내가 고른 파일과 쌤보드가 만든 파일만)을 더 받습니다.
+- Claude 열쇠는 그 브라우저에만 두고 드라이브에도 올리지 않습니다. AI 요청은 브라우저가 Claude 에 바로 보냅니다.
+- 공용 컴퓨터에서는 다 쓰고 **더보기 → 로그아웃**: 드라이브에 저장한 뒤 그 브라우저의 자료를 지웁니다.
+
+### 내 주소로 따로 띄우기(선택)
+
+1. 이 저장소를 포크하고 Settings → Pages → Source 를 **GitHub Actions** 로 둡니다.
+2. [Google Cloud 콘솔](https://console.cloud.google.com/)에서 프로젝트를 만들고 **Google Drive API** 를 켭니다.
+3. OAuth 동의 화면: 범위에 `.../auth/drive.appdata`, `openid`, `email`, `profile` 을 넣고 **프로덕션으로 게시**합니다(테스트 상태면 등록한 계정만 쓸 수 있습니다).
+4. 사용자 인증 정보 → OAuth 클라이언트 ID(웹 애플리케이션) → 승인된 JavaScript 원본에 `https://<내 아이디>.github.io` 를 넣습니다.
+5. 저장소 Settings → Secrets and variables → Actions → **Variables** 에 `VITE_GOOGLE_CLIENT_ID` 로 그 클라이언트 ID 를 넣고, Actions 에서 "구글 드라이브 트랙(GitHub Pages)"을 한 번 돌립니다.
+6. (시트 가져오기를 쓰려면) **Google Sheets API**·**Google Picker API**·**Google Forms API** 를 켜고, HTTP 리퍼러를 내 Pages 주소로 제한한 API 키를 `VITE_GOOGLE_PICKER_API_KEY`, 프로젝트 번호를 `VITE_GOOGLE_APP_ID` 변수로 넣습니다. 동의 화면 범위에 `.../auth/drive.file` 도 더합니다.
+
+내 컴퓨터에서 시험할 때: `npm ci && VITE_GOOGLE_CLIENT_ID=... npm run build:local` → `apps/web/dist-local` 을 정적 서버로 엽니다.
+
+## 서버 트랙
+
+### 설치 (10분)
 
 **필요한 것**: [Docker](https://docs.docker.com/get-docker/) 가 깔린 컴퓨터 한 대(맥·리눅스·윈도우 WSL), AI 를 쓰려면 [Claude API 키](https://console.anthropic.com/).
 
@@ -65,8 +103,9 @@ docker compose down                                     # 끄기(자료는 남�
 
 ```
 packages/shared   화면과 서버가 같이 쓰는 규칙(타입·표 형식·집계 검증·개인정보 가림)
-apps/api          NestJS 서버 + 워커 + 서버 콘솔 명령(jarvis), PostgreSQL 16
-apps/web          React + Vite + Tailwind 화면(PC 격자 보드, 휴대폰 2열 타일, PWA)
+apps/api          NestJS 서버 + 워커 + 서버 콘솔 명령(jarvis), PostgreSQL 16 — 기능은 여기에 넣으면 두 트랙에 함께 들어갑니다
+apps/local        구글 드라이브 트랙: 서버 코드를 브라우저에서 돌리는 대체품·라우터, PGlite, 드라이브 맞춤, 구글 로그인
+apps/web          React + Vite + Tailwind 화면(PC 격자 보드, 휴대폰 2열 타일, PWA). VITE_EDITION=local 이면 구글 드라이브 트랙
 deploy, scripts   Caddy 설정, 설치·백업·복구 스크립트
 ```
 
@@ -94,4 +133,4 @@ npm run typecheck && npm test                 # 고친 뒤 검사
 
 ## 라이선스
 
-MIT — 자유롭게 고쳐 쓰고 다시 배포할 수 있습니다. 글꼴(에이투지체)은 SIL OFL 1.1 을 따릅니다.
+MIT — 자유롭게 고쳐 쓰고 다시 배포할 수 있습니다. 글꼴(에이투지체)은 SIL OFL 1.1, 브라우저 안 데이터베이스 PGlite 는 Apache 2.0 을 따릅니다.

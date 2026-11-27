@@ -43,6 +43,8 @@ export interface StoredStep {
 }
 
 type Entity = 'tasks' | 'events' | 'blocks' | 'data_tables' | 'notifications';
+/** 되돌리기 SQL 에 표 이름으로 들어가는 값 — 기록은 가져오기 파일에서 올 수도 있어 이 목록만 받는다(2026-11-27 코덱스 검토). */
+const ENTITIES: readonly string[] = ['tasks', 'events', 'blocks', 'data_tables', 'notifications'];
 type Change =
   | { kind: 'created'; entity: Entity; id: string; label: string }
   | { kind: 'updated'; entity: Entity; id: string; label: string; before: Record<string, any> }
@@ -505,6 +507,7 @@ export class CommandsService {
         entity !== 'notifications' && (await q.one(`select 1 as hit from ${entity} where id = $1 and user_id = $2 and updated_at > ${appliedAt}`, [rowId, uid, id])) !== null;
 
       for (const change of [...cmd!.changes].reverse()) {
+        if (change.kind !== 'rows_added' && !ENTITIES.includes(change.entity)) bad('되돌리기 기록이 잘못됐습니다.');
         if (change.kind === 'rows_added') {
           await q.query(
             `update data_rows set deleted_at = now() where table_id = $1 and user_id = $2 and command_id = $3 and deleted_at is null and updated_at <= ${appliedAt}`,

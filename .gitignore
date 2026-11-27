@@ -1,7 +1,9 @@
 node_modules/
 dist/
 .env
-data/
-backups/
+/data/
+/backups/
 *.log
 .DS_Store
+apps/web/dist-local
+apps/local/test/.*.bundle.mjs

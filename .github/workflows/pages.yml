@@ -1,0 +1,49 @@
+name: 구글 드라이브 트랙(GitHub Pages)
+
+# 서버 없는 판을 GitHub Pages 에 올린다. 자료는 쓰는 사람의 브라우저와 구글 드라이브에만 있다.
+# 구글 로그인을 쓰려면 저장소 Settings → Secrets and variables → Actions → Variables 에
+#   VITE_GOOGLE_CLIENT_ID (구글 OAuth 클라이언트 ID — 공개돼도 되는 값)를 넣는다. 없으면 '이 기기에서만'만 열린다.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+      - run: npm run build:local
+        env:
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
+          VITE_GOOGLE_PICKER_API_KEY: ${{ vars.VITE_GOOGLE_PICKER_API_KEY }}
+          VITE_GOOGLE_APP_ID: ${{ vars.VITE_GOOGLE_APP_ID }}
+          VITE_SERVER_TRACK_URL: https://github.com/${{ github.repository }}#서버-트랙
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/web/dist-local
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
