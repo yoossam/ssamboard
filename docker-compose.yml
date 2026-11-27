@@ -1,0 +1,70 @@
+# 개인 서버 1대에서 돌리는 구성(5장 가용성).
+#   docker compose up -d --build                    DB + 앱
+#   docker compose --profile tunnel up -d --build   + Cloudflare Tunnel (HTTPS)
+#   docker compose --profile caddy up -d --build    + Caddy (HTTPS, 80·443 포트를 직접 열 때)
+# 프로젝트 이름을 고정한다. 어느 폴더(러너 작업 폴더 포함)에서 띄워도 같은 DB 볼륨을 쓰게 하려는 것이다.
+name: ssamboard
+
+services:
+  db:
+    image: postgres:16
+    restart: always
+    environment:
+      POSTGRES_USER: jarvis
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD를 .env에 넣으세요}
+      POSTGRES_DB: jarvis
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U jarvis -d jarvis']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    # 러너가 체크아웃한 폴더에는 .env 가 없다. 배포 워크플로가 JARVIS_BOARD_ENV 로 실제 위치를 넘긴다.
+    env_file: ${JARVIS_BOARD_ENV:-.env}
+    environment:
+      DATABASE_URL: postgres://jarvis:${POSTGRES_PASSWORD}@db:5432/jarvis
+      PORT: 3000
+    # 바깥에는 열지 않고 이 서버 안에서만 접근한다. HTTPS는 터널이나 Caddy가 맡는다.
+    ports:
+      # 3000 을 이미 쓰는 서비스가 있으면 .env 의 APP_PORT 로 바꾼다.
+      - '127.0.0.1:${APP_PORT:-3000}:3000'
+    volumes:
+      - uploads:/app/data
+
+  tunnel:
+    profiles: ['tunnel']
+    image: cloudflare/cloudflared:latest
+    restart: always
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+    depends_on:
+      - app
+
+  caddy:
+    profiles: ['caddy']
+    image: caddy:2
+    restart: always
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      CADDY_DOMAIN: ${CADDY_DOMAIN:-localhost}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on:
+      - app
+
+volumes:
+  db:
+  uploads:
+  caddy_data:

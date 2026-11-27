@@ -1,0 +1,4 @@
+# 저장소에는 LF로 둔다. Windows에서 받아도 셸 스크립트·Dockerfile이 서버(Linux)에서 그대로 돌게 한다.
+* text=auto eol=lf
+*.png binary
+*.ico binary

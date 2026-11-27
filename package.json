@@ -1,0 +1,29 @@
+{
+  "name": "jarvis",
+  "version": "0.1.0",
+  "private": true,
+  "description": "쌤보드 — 교무업무용 한 페이지 블록 보드 + AI (옛 이름 자비스, PRD v3 MVP)",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "npm run build -w @jarvis/shared && npm run build -w @jarvis/api && npm run build -w @jarvis/web",
+    "test": "npm run build -w @jarvis/shared && npm test -w @jarvis/shared && npm test -w @jarvis/api",
+    "dev:shared": "npm run dev -w @jarvis/shared",
+    "dev:api": "npm run dev -w @jarvis/api",
+    "dev:web": "npm run dev -w @jarvis/web",
+    "dev:db:install": "npm install --prefix tools/dev-db --no-audit --no-fund",
+    "dev:db": "npm start --prefix tools/dev-db",
+    "migrate": "npm run migrate -w @jarvis/api",
+    "reset-pin": "npm run reset-pin -w @jarvis/api --",
+    "typecheck": "npm run typecheck -w @jarvis/api && npm run typecheck -w @jarvis/web"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "~6.0.3"
+  }
+}

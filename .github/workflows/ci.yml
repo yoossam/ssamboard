@@ -1,0 +1,28 @@
+name: CI
+
+# 공개 저장소용 검사: 타입 검사 · 시험 · 빌드 · Docker 이미지 만들기.
+# 어떤 서버에도 배포하지 않는다(GitHub 가 빌려주는 컴퓨터에서만 돈다).
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build -w @jarvis/shared
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: docker build -t ssamboard:ci .

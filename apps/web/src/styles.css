@@ -1,0 +1,215 @@
+@import 'tailwindcss';
+
+/*
+ * 글꼴 — 에이투지체(A2Z, SIL OFL 1.1). 허락서는 public/licenses/A2Z-OFL.txt 로 함께 내보낸다(/licenses/A2Z-OFL.txt).
+ * 파일은 public/fonts 에 둔다. 주소가 바뀌지 않아야 AI 화면 틀에서도 같은 글꼴을 부를 수 있다(apps/api/src/boards/view-frame.ts).
+ * 굵기는 보통(4 Regular)과 중간(5 Medium) 두 가지만 담았다(2026-11-26 "굵기 중간 이하").
+ * 화면 코드의 font-medium(500)까지는 보통으로, font-bold(700)처럼 그보다 굵은 것은 모두 중간으로 그린다.
+ * 더 굵게 쓰고 싶어지면 굵기 파일을 더 담고 아래 범위를 나눈다.
+ */
+@font-face {
+  font-family: 'A2Z';
+  font-style: normal;
+  font-weight: 1 500;
+  font-display: swap;
+  src: url('/fonts/a2z-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'A2Z';
+  font-style: normal;
+  font-weight: 501 1000;
+  font-display: swap;
+  src: url('/fonts/a2z-500.woff2') format('woff2');
+}
+
+/* 시안(자비스 화면 시안 v1)의 색·글꼴 값 */
+@theme {
+  --font-sans: 'A2Z', 'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
+  --color-ground: #f2f4f7;
+  --color-card: #ffffff;
+  --color-line: #dadfe7;
+  --color-rule: #eef0f3;
+  --color-ink: #14171f;
+  --color-sub: #5b6472;
+  --color-accent: #1f4fd8;
+  --color-tint: #e8eefc;
+  --color-danger: #b42318;
+  --color-dangertint: #fdecea;
+  --color-tag: #eef0f3;
+  --color-tagink: #4b5563;
+  --color-field: #c5ccd8;
+  --color-bar: #8fa8ee;
+  --color-scrim: rgb(20 23 31 / 0.5);
+
+  /*
+   * 글자 크기(2026-11-27 "글꼴과 제목이 너무 작다") — 화면 코드의 text-xs·sm·base 가 가리키는 값을 한 단계씩 키웠다.
+   * 보조 글자 12 → 13px, 본문 14 → 15px, 창 제목 16 → 18px. 더 키우거나 줄이려면 여기 세 줄과 아래 body 한 줄만 고친다.
+   * 블록 제목(15·17px)과 맨 위 이름(20px)은 Board.tsx 에 있다.
+   */
+  --text-xs: 0.8125rem;
+  --text-xs--line-height: 1.4;
+  --text-sm: 0.9375rem;
+  --text-sm--line-height: 1.45;
+  --text-base: 1.125rem;
+  --text-base--line-height: 1.45;
+}
+
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--color-line);
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    margin: 0;
+    background: var(--color-ground);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.5;
+    /* 에이투지체에 없는 글자가 다른 글꼴로 그려질 때도 억지로 굵게 만들지 않는다. */
+    font-synthesis-weight: none;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none;
+  }
+  button {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+  input,
+  textarea,
+  select {
+    font: inherit;
+    color: inherit;
+  }
+  /* iOS에서 입력할 때 화면이 확대되지 않게 한다. */
+  @media (max-width: 767px) {
+    input,
+    textarea,
+    select {
+      font-size: 16px;
+    }
+  }
+}
+
+/* 격자: 고정한 블록은 끌 수 없고, 편집 모드에서만 머리줄을 잡아 옮긴다. */
+.react-grid-item.react-grid-placeholder {
+  background: var(--color-accent);
+  opacity: 0.12;
+  border-radius: 12px;
+  /* 자리 표시는 누르는 순간부터 블록 위에 놓인다. 누름을 가로채면 메모 제목을 눌러도 고르기가 되지 않는다. */
+  pointer-events: none;
+}
+.react-grid-item > .react-resizable-handle {
+  z-index: 2;
+}
+/* 블록을 끌거나 크기를 바꾸는 동안에는 AI 화면 틀이 마우스를 가로채지 않게 한다(틀 위를 지나면 끌기가 끊긴다). */
+body.react-draggable-transparent-selection .view-frame {
+  pointer-events: none;
+}
+.block-drag,
+.block-drag button:not(.no-drag *) {
+  cursor: grab;
+}
+.block-drag:active {
+  cursor: grabbing;
+}
+
+/*
+ * 메모(붙임쪽지) 종이 색. 이름은 shared 의 MEMO_COLORS 와 같아야 한다(shared 시험이 확인한다).
+ * --memo-bg 종이, --memo-bar 머리띠·테두리. 글자색(--color-ink)과의 대비가 충분한 옅은 색만 쓴다.
+ */
+[data-memo='yellow'] {
+  --memo-bg: #fff6bf;
+  --memo-bar: #fbe58a;
+}
+[data-memo='pink'] {
+  --memo-bg: #ffe3ec;
+  --memo-bar: #f9c3d5;
+}
+[data-memo='green'] {
+  --memo-bg: #e0f5da;
+  --memo-bar: #bfe6b5;
+}
+[data-memo='blue'] {
+  --memo-bg: #deecff;
+  --memo-bar: #bdd6f8;
+}
+[data-memo='purple'] {
+  --memo-bg: #ece4ff;
+  --memo-bar: #d6c8f8;
+}
+[data-memo='orange'] {
+  --memo-bg: #ffe8cf;
+  --memo-bar: #f9cf9e;
+}
+[data-memo='white'] {
+  --memo-bg: #ffffff;
+  --memo-bar: #e3e7ee;
+}
+.memo-paper {
+  background: var(--memo-bg);
+  border-color: var(--memo-bar);
+}
+.memo-bar {
+  background: var(--memo-bar);
+}
+.memo-dot {
+  background: var(--memo-bg);
+  border: 2px solid var(--memo-bar);
+}
+/* 머리띠의 단추는 마우스를 올리거나 글을 쓰는 동안에만 보인다. 켜진 단추(고정됨·색 고르는 중)는 늘 보인다. 터치 화면에서는 늘 보인다. */
+@media (hover: hover) {
+  .memo-card .memo-tool {
+    opacity: 0;
+    transition: opacity 0.12s;
+  }
+  .memo-card:hover .memo-tool,
+  .memo-card:focus-within .memo-tool,
+  .memo-card .memo-tool[aria-pressed='true'] {
+    opacity: 1;
+  }
+}
+
+@keyframes rise {
+  from {
+    transform: translateY(16px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.anim-rise {
+  animation: rise 0.18s ease-out;
+}
+.anim-fade {
+  animation: fade 0.15s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .anim-rise,
+  .anim-fade {
+    animation: none;
+  }
+}

@@ -1,0 +1,8 @@
+# Caddy가 인증서를 자동으로 받아 HTTPS로 내보낸다.
+{$CADDY_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy app:3000 {
+		# AI 응답(SSE)이 끊기지 않고 바로 흘러가게 한다.
+		flush_interval -1
+	}
+}
