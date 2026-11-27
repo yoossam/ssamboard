@@ -1,5 +1,6 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, loadEnv, type Plugin } from 'vite';
 // 구글 드라이브 트랙 빌드 규칙: 서버 코드가 부르는 Node·Nest 모듈을 브라우저 대체품으로 바꾼다.
@@ -73,6 +74,10 @@ function localCsp(): Plugin {
       this.emitFile({ type: 'asset', fileName: LOCAL_VIEW_SCRIPT, source: localViewBootstrap() });
       const version = Object.keys(bundle).sort().join('|').length.toString(36) + '-' + Date.now().toString(36);
       this.emitFile({ type: 'asset', fileName: 'sw-local.js', source: LOCAL_SW.replace('__VERSION__', version) });
+      // 개인정보처리방침(구글 동의 화면에 적는 주소) — 문의 링크는 공개 저장소 주소(Pages 빌드의 서버 트랙 안내 주소에서 뗀다)
+      const repo = (process.env.VITE_SERVER_TRACK_URL ?? '').split('#')[0].replace(/\/$/, '') || 'https://github.com';
+      const privacy = readFileSync(fileURLToPath(new URL('./local-public/privacy.html', import.meta.url)), 'utf8');
+      this.emitFile({ type: 'asset', fileName: 'privacy.html', source: privacy.replaceAll('__REPO_URL__', repo) });
     },
     configureServer(server) {
       server.middlewares.use(`/${LOCAL_VIEW_SCRIPT}`, (_req, res) => {
