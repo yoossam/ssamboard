@@ -6,6 +6,7 @@ import { Button, Empty, IconButton, useIsPhone, useSize } from '../components/ui
 import { api, errorMessage } from '../lib/api';
 import { keys, queryClient, refresh, useBoard } from '../lib/data';
 import { dateLabel } from '../lib/format';
+import { imageFilesFrom, MAX_IMAGES, shrinkImage } from '../lib/images';
 import { useApp } from '../lib/store';
 import { BlockBody, BlockCount, TileLines } from './blocks';
 import { MemoColorButton } from './memo';
@@ -356,6 +357,19 @@ function AiBar() {
   const selected = useApp((s) => s.selected.length);
   const [text, setText] = useState('');
   const input = useRef<HTMLInputElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  // 이미지를 고르거나 붙여넣으면 줄여서 AI 창으로 넘긴다. 쓴 말이 있으면 함께 보내고, 없으면 붙여 둔 채 할 말을 기다린다.
+  const sendImages = async (files: File[]) => {
+    if (files.length === 0) return;
+    try {
+      const images = await Promise.all(files.slice(0, MAX_IMAGES).map(shrinkImage));
+      openAi(text.trim() || undefined, undefined, images);
+      setText('');
+    } catch (e) {
+      useApp.getState().toast(errorMessage(e), 'error');
+    }
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -383,7 +397,35 @@ function AiBar() {
       }}
     >
       <Icon name="sparkle" className="text-accent" />
-      <input ref={input} value={text} onChange={(e) => setText(e.target.value)} placeholder="무엇을 도와드릴까요?" aria-label="AI에게 요청" className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none" />
+      <input
+        ref={input}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onPaste={(e) => {
+          const files = imageFilesFrom(e.clipboardData);
+          if (files.length === 0) return;
+          e.preventDefault();
+          void sendImages(files);
+        }}
+        placeholder="무엇을 도와드릴까요?"
+        aria-label="AI에게 요청"
+        className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none"
+      />
+      <button type="button" aria-label="이미지 붙이기" title="이미지 붙이기" onClick={() => fileInput.current?.click()} className="flex size-10 shrink-0 items-center justify-center rounded-full text-sub hover:bg-tint hover:text-accent">
+        <Icon name="image" size={20} />
+      </button>
+      <input
+        ref={fileInput}
+        type="file"
+        accept="image/*"
+        multiple
+        hidden
+        onChange={(e) => {
+          const files = Array.from(e.target.files ?? []);
+          e.target.value = '';
+          void sendImages(files);
+        }}
+      />
       {selected > 0 && <span className="shrink-0 rounded-md bg-tint px-2 py-1 text-xs font-medium whitespace-nowrap text-accent">블록 {selected}개</span>}
       {!phone && <kbd className="shrink-0 rounded-md bg-tag px-2 py-1 font-sans text-xs whitespace-nowrap text-tagink">Ctrl K</kbd>}
       <button type="submit" aria-label="보내기" className="flex size-10 shrink-0 items-center justify-center rounded-full bg-accent text-white hover:brightness-110">

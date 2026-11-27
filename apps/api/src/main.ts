@@ -52,7 +52,8 @@ async function bootstrap(): Promise<void> {
   app.disable('x-powered-by');
   app.use(securityHeaders);
   app.use(cookieParser());
-  app.useBodyParser('json', { limit: '2mb' });
+  // AI 창의 이미지 첨부(최대 4장, 화면에서 줄여 보냄) 때문에 2MB → 16MB(2026-11-27). 다른 요청은 각자 글자 수를 따로 막는다.
+  app.useBodyParser('json', { limit: '16mb' });
   app.setGlobalPrefix('api', { exclude: ['health'] });
   app.enableShutdownHooks();
 

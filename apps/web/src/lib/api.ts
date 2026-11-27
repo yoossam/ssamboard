@@ -68,7 +68,7 @@ export function errorMessage(e: unknown): string {
 
 /** AI 창 입력. 응답은 SSE로 조금씩 온다(ONE-8). */
 export async function streamAi(
-  body: { text: string; data?: string; context_block_ids?: string[]; conversation_id?: string },
+  body: { text: string; data?: string; context_block_ids?: string[]; conversation_id?: string; images?: { media_type: string; data: string }[] },
   onEvent: (event: AiStreamEvent) => void,
   signal: AbortSignal,
 ): Promise<void> {

@@ -5,6 +5,7 @@ import { deviceName, isIdleLocked, pinFailure, secondsLeft } from '../src/auth/l
 import { decrypt, encrypt, hmac, safeEqual, signState, verifyState } from '../src/common/crypto';
 import { RateLimiter } from '../src/common/rate-limit';
 import { buildQuerySql, toQueryResult } from '../src/tables/query-sql';
+import { imageBlocks, MAX_IMAGES } from '../src/ai/ai.service';
 
 const KEY = Buffer.alloc(32, 7).toString('base64');
 
@@ -114,4 +115,21 @@ describe('조회·집계 SQL 만들기 (4.4)', () => {
     assert.match(b.sql, /order by a1 desc nulls last limit 100$/);
     assert.deepEqual(toQueryResult(b, [{ g0: '미수', a0: 3, a1: 1033333.3 }]).rows, [['미수', 3, 1033333.3]]);
   });
+});
+
+// ── AI 창 이미지 첨부(2026-11-27) ─────────────────────────────────────────────
+describe('AI 창 이미지 첨부', () => {
+  it('맞는 모양만 Claude 이미지 블록으로 바꾸고, 틀리면 조용히 빼지 않고 거절한다', () => {
+  const png = Buffer.from('fake-png-bytes').toString('base64');
+  assert.deepEqual(imageBlocks(undefined), []);
+  assert.deepEqual(imageBlocks([{ media_type: 'image/jpeg', data: png }]), [
+    { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: png } },
+  ]);
+  const one = { media_type: 'image/png', data: png };
+  assert.throws(() => imageBlocks(Array(MAX_IMAGES + 1).fill(one)), /한 번에 4장/);
+  assert.throws(() => imageBlocks([{ media_type: 'image/svg+xml', data: png }]), /JPG·PNG·WEBP·GIF/);
+  assert.throws(() => imageBlocks([{ media_type: 'image/png', data: 'data:image/png;base64,AAAA' }]), /읽을 수 없습니다/);
+  assert.throws(() => imageBlocks([{ media_type: 'image/png', data: 'A'.repeat(4_000_004) }]), /너무 크거나/);
+  assert.throws(() => imageBlocks('nope'), /형식이 올바르지/);
+});
 });

@@ -48,7 +48,7 @@
 
 | ID | 상태 | 위치와 메모 |
 |---|---|---|
-| LLM-2 | ✅ | AI 창의 "자료", 파일 올리기, Google 시트 |
+| LLM-2 | ✅ | AI 창의 "자료", 파일 올리기, Google 시트. **이미지 첨부**(2026-11-27): AI 창·아래 입력줄의 이미지 단추·붙여넣기·끌어 놓기, 한 번에 4장, 화면에서 긴 변 1568px JPEG 로 줄여 보냄(`apps/web/src/lib/images.ts`), 서버 검사 `ai.service.ts` 의 `imageBlocks`(형식·크기), 저장하지 않고 이번 요청에만 Claude 로 보냄(대화 기록에는 '이미지 N장 첨부'만), 이미지 속 글도 데이터로만 다룸 |
 | LLM-3 | ✅ | 표 형식은 서버 파싱 + 앞 200행으로 제안(`uploads/uploads.service.ts`), 비정형은 `create_table` 도구(최대 200행) |
 | LLM-4 | ✅ | 미리보기에서 이름·타입 수정, 기존 표에 추가 — `PreviewEditor`, `POST /api/tables/:id/append` |
 | LLM-5 | ✅ | 표 상세 → 설정 → 보드에 배치 |

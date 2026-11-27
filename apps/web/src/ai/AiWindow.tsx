@@ -6,6 +6,7 @@ import { SafeText } from '../components/SafeText';
 import { Button, ButtonRow, compactInput, IconButton, inputClass, Notice, Tag, useIsPhone } from '../components/ui';
 import { api, errorMessage, streamAi } from '../lib/api';
 import { refresh, useBoard } from '../lib/data';
+import { imageFilesFrom, MAX_IMAGES, shrinkImage, type AttachedImage } from '../lib/images';
 import { useApp } from '../lib/store';
 
 // 하나뿐인 AI 창(ONE-2). 대화와 실행을 모두 맡는다.
@@ -19,6 +20,8 @@ interface UserMsg {
   text: string;
   data: string;
   blocks: string[];
+  /** 첨부한 이미지의 미리보기(data: 주소). 이 화면에서만 보이고 서버에는 남지 않는다. */
+  images?: string[];
 }
 interface AiMsg {
   id: number;
@@ -38,7 +41,7 @@ interface AiState {
   conversationId: string | undefined;
   busy: boolean;
   abort: AbortController | null;
-  send: (text: string, data: string, blockIds: string[], blockTitles: string[]) => Promise<void>;
+  send: (text: string, data: string, blockIds: string[], blockTitles: string[], images?: AttachedImage[]) => Promise<void>;
   stop: () => void;
   patch: (id: number, change: Partial<AiMsg>) => void;
   reset: () => void;
@@ -57,21 +60,27 @@ export const useAi = create<AiState>()((set, get) => ({
     get().abort?.abort();
     set({ messages: [], conversationId: undefined, busy: false, abort: null });
   },
-  send: async (text, data, blockIds, blockTitles) => {
-    if (get().busy || !text.trim()) return;
+  send: async (text, data, blockIds, blockTitles, images = []) => {
+    if (get().busy || (!text.trim() && images.length === 0)) return;
     const abort = new AbortController();
     const askId = ++seq;
     const replyId = ++seq;
     set((s) => ({
       busy: true,
       abort,
-      messages: [...s.messages, { id: askId, role: 'user', text: text.trim(), data, blocks: blockTitles }, { id: replyId, role: 'assistant', text: '', tools: [], streaming: true, edits: {} }],
+      messages: [...s.messages, { id: askId, role: 'user', text: text.trim(), data, blocks: blockTitles, images: images.map((img) => img.preview) }, { id: replyId, role: 'assistant', text: '', tools: [], streaming: true, edits: {} }],
     }));
     const patch = get().patch;
     const current = () => get().messages.find((m): m is AiMsg => m.id === replyId && m.role === 'assistant');
     try {
       await streamAi(
-        { text: text.trim(), data: data || undefined, context_block_ids: blockIds, conversation_id: get().conversationId },
+        {
+          text: text.trim(),
+          data: data || undefined,
+          context_block_ids: blockIds,
+          conversation_id: get().conversationId,
+          images: images.length > 0 ? images.map(({ media_type, data: b64 }) => ({ media_type, data: b64 })) : undefined,
+        },
         (event) => {
           const msg = current();
           if (!msg) return;
@@ -270,9 +279,18 @@ function Message({ msg }: { msg: Msg }) {
   if (msg.role === 'user') {
     return (
       <div className="flex flex-col items-end gap-1">
-        <div className="max-w-[85%] rounded-[14px_14px_4px_14px] bg-accent px-3.5 py-2.5 text-white">
-          <SafeText text={msg.text} className="[&_a]:text-white" />
-        </div>
+        {msg.images && msg.images.length > 0 && (
+          <div className="flex max-w-[85%] flex-wrap justify-end gap-1.5">
+            {msg.images.map((src, i) => (
+              <img key={i} src={src} alt={`첨부 이미지 ${i + 1}`} className="size-20 rounded-[10px] border object-cover" />
+            ))}
+          </div>
+        )}
+        {msg.text && (
+          <div className="max-w-[85%] rounded-[14px_14px_4px_14px] bg-accent px-3.5 py-2.5 text-white">
+            <SafeText text={msg.text} className="[&_a]:text-white" />
+          </div>
+        )}
         {(msg.blocks.length > 0 || msg.data) && (
           <div className="flex max-w-[85%] flex-wrap justify-end gap-1">
             {msg.blocks.map((b) => (
@@ -315,7 +333,30 @@ function Composer({ blocks }: { blocks: BlockDto[] }) {
   const [text, setText] = useState('');
   const [data, setData] = useState('');
   const [showData, setShowData] = useState(false);
+  const [images, setImages] = useState<AttachedImage[]>([]);
+  const [imageError, setImageError] = useState('');
+  const [shrinking, setShrinking] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
+
+  // 이미지 붙이기: 단추로 고르기·붙여넣기(Ctrl+V)·끌어 놓기. 보내기 전에 이 기기에서 줄인다(lib/images.ts).
+  const attach = async (files: File[]) => {
+    if (files.length === 0) return;
+    setImageError('');
+    const room = MAX_IMAGES - images.length;
+    if (room <= 0) return setImageError(`이미지는 한 번에 ${MAX_IMAGES}장까지 붙일 수 있습니다.`);
+    if (files.length > room) setImageError(`이미지는 한 번에 ${MAX_IMAGES}장까지라 ${room}장만 붙였습니다.`);
+    setShrinking(true);
+    try {
+      const made = await Promise.all(files.slice(0, room).map(shrinkImage));
+      setImages((now) => [...now, ...made].slice(0, MAX_IMAGES));
+    } catch (e) {
+      setImageError(errorMessage(e));
+    } finally {
+      setShrinking(false);
+      input.current?.focus();
+    }
+  };
   const picked = blocks.filter((b) => selected.includes(b.id));
 
   // "@일정"처럼 쓰면 블록을 골라 컨텍스트로 넣는다(ONE-7).
@@ -331,13 +372,18 @@ function Composer({ blocks }: { blocks: BlockDto[] }) {
   const waiting = useApp((s) => s.aiDraft);
   useEffect(() => {
     const draft = useApp.getState().takeDraft();
-    if (draft) void submit(draft.text, draft.data);
+    // 입력줄에서 이미지만 넘어왔으면 붙여 두고 할 말을 기다린다. 글이 함께 오면 바로 보낸다.
+    if (draft?.images?.length && !draft.text.trim()) {
+      setImages(draft.images.slice(0, MAX_IMAGES));
+      input.current?.focus();
+    } else if (draft) void submit(draft.text, draft.data, draft.images);
     else input.current?.focus();
   }, [waiting]);
 
-  const submit = async (value = text, attached?: string) => {
+  const submit = async (value = text, attached?: string, attachedImages?: AttachedImage[]) => {
     const body = value.trim();
-    if (!body || busy) return;
+    const sending = attachedImages ?? images;
+    if ((!body && sending.length === 0) || busy || shrinking) return;
     const current = useApp.getState().selected;
     const chosen = blocks.filter((b) => current.includes(b.id));
     setText('');
@@ -345,11 +391,47 @@ function Composer({ blocks }: { blocks: BlockDto[] }) {
     setData('');
     setShowData(false);
     clearSelected();
-    await send(body, pasted, chosen.map((b) => b.id), chosen.map((b) => b.title));
+    setImages([]);
+    setImageError('');
+    await send(body, pasted, chosen.map((b) => b.id), chosen.map((b) => b.title), sending);
   };
 
   return (
-    <div className="shrink-0 border-t border-rule p-3">
+    <div
+      className="shrink-0 border-t border-rule p-3"
+      onDragOver={(e) => {
+        if (Array.from(e.dataTransfer.types).includes('Files')) e.preventDefault();
+      }}
+      onDrop={(e) => {
+        const files = imageFilesFrom(e.dataTransfer);
+        if (files.length === 0) return;
+        e.preventDefault();
+        void attach(files);
+      }}
+    >
+      {(images.length > 0 || shrinking) && (
+        <div className="mb-2 flex flex-wrap items-center gap-1.5" aria-label="붙인 이미지">
+          {images.map((img, i) => (
+            <div key={img.id} className="relative">
+              <img src={img.preview} alt={`붙인 이미지 ${i + 1}`} className="size-16 rounded-[10px] border object-cover" />
+              <button
+                type="button"
+                aria-label={`이미지 ${i + 1} 빼기`}
+                onClick={() => setImages((now) => now.filter((x) => x.id !== img.id))}
+                className="absolute -top-1.5 -right-1.5 flex size-6 items-center justify-center rounded-full border bg-card text-ink shadow-sm"
+              >
+                <Icon name="close" size={14} />
+              </button>
+            </div>
+          ))}
+          {shrinking && <span className="text-xs text-sub">이미지를 준비하는 중…</span>}
+        </div>
+      )}
+      {imageError && (
+        <div className="mb-2">
+          <Notice tone="danger">{imageError}</Notice>
+        </div>
+      )}
       {candidates.length > 0 && (
         <div className="mb-2 grid grid-cols-2 gap-1.5">
           {candidates.map((b) => (
@@ -384,10 +466,29 @@ function Composer({ blocks }: { blocks: BlockDto[] }) {
       )}
       <div className="flex items-end gap-1.5">
         <IconButton icon="paste" label={showData ? '자료 닫기' : '자료 붙여넣기'} active={showData || !!data} onClick={() => setShowData(!showData)} />
+        <IconButton icon="image" label="이미지 붙이기(붙여넣기·끌어 놓기도 됨)" active={images.length > 0} onClick={() => fileInput.current?.click()} />
+        <input
+          ref={fileInput}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          onChange={(e) => {
+            const files = Array.from(e.target.files ?? []);
+            e.target.value = '';
+            void attach(files);
+          }}
+        />
         <textarea
           ref={input}
           value={text}
           onChange={(e) => setText(e.target.value)}
+          onPaste={(e) => {
+            const files = imageFilesFrom(e.clipboardData);
+            if (files.length === 0) return;
+            e.preventDefault();
+            void attach(files);
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
@@ -396,7 +497,7 @@ function Composer({ blocks }: { blocks: BlockDto[] }) {
           }}
           rows={Math.min(4, Math.max(1, text.split('\n').length))}
           maxLength={4000}
-          placeholder={hasMessages ? '이어서 요청하기' : '무엇을 도와드릴까요?  @로 블록 지정'}
+          placeholder={images.length > 0 ? '이미지로 무엇을 할까요? (비워 두면 내용을 정리해 줘요)' : hasMessages ? '이어서 요청하기' : '무엇을 도와드릴까요?  @로 블록 지정'}
           aria-label="AI에게 요청"
           className="min-h-11 min-w-0 flex-1 resize-none rounded-[10px] border border-field bg-card px-3 py-2.5 text-sm outline-none focus:border-accent"
         />
@@ -405,7 +506,7 @@ function Composer({ blocks }: { blocks: BlockDto[] }) {
             <Icon name="close" size={18} />
           </button>
         ) : (
-          <button type="button" aria-label="보내기" title="보내기" disabled={!text.trim()} onClick={() => void submit()} className="flex size-11 shrink-0 items-center justify-center rounded-full bg-accent text-white disabled:opacity-40">
+          <button type="button" aria-label="보내기" title="보내기" disabled={(!text.trim() && images.length === 0) || shrinking} onClick={() => void submit()} className="flex size-11 shrink-0 items-center justify-center rounded-full bg-accent text-white disabled:opacity-40">
             <Icon name="send" size={18} />
           </button>
         )}
