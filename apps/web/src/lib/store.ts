@@ -1,5 +1,5 @@
 import type { AuthStatus } from '@jarvis/shared';
-import type { AttachedImage } from './images';
+import type { AttachedFile, AttachedImage, AttachedLink } from './images';
 import { create } from 'zustand';
 
 // 화면 상태(잠금, 열려 있는 창, 편집 모드). 서버 데이터는 TanStack Query가 맡는다.
@@ -40,7 +40,7 @@ interface AppState {
   aiOpen: boolean;
   aiLayout: AiLayout;
   /** AI 창을 열면서 바로 보낼 말. data 는 요청이 아니라 자료로 붙는다(믿을 수 없는 글은 여기에 싣는다). */
-  aiDraft: { text: string; data?: string; images?: AttachedImage[] } | null;
+  aiDraft: { text: string; data?: string; images?: AttachedImage[]; files?: AttachedFile[]; links?: AttachedLink[] } | null;
   editMode: boolean;
   /** AI에 컨텍스트로 줄 블록(ONE-7). */
   selected: string[];
@@ -54,9 +54,9 @@ interface AppState {
   replace: (panel: Panel) => void;
   close: () => void;
   closeAll: () => void;
-  openAi: (draft?: string, data?: string, images?: AttachedImage[]) => void;
+  openAi: (draft?: string, data?: string, images?: AttachedImage[], files?: AttachedFile[], links?: AttachedLink[]) => void;
   closeAi: () => void;
-  takeDraft: () => { text: string; data?: string; images?: AttachedImage[] } | null;
+  takeDraft: () => { text: string; data?: string; images?: AttachedImage[]; files?: AttachedFile[]; links?: AttachedLink[] } | null;
   setAiLayout: (layout: AiLayout) => void;
   setEditMode: (on: boolean) => void;
   toggleSelected: (blockId: string) => void;
@@ -99,7 +99,7 @@ export const useApp = create<AppState>()((set, get) => ({
   replace: (panel) => set((s) => ({ panels: [...s.panels.slice(0, -1), panel] })),
   close: () => set((s) => ({ panels: s.panels.slice(0, -1) })),
   closeAll: () => set({ panels: [] }),
-  openAi: (draft, data, images) => set({ aiOpen: true, aiDraft: draft || images?.length ? { text: draft ?? '', data, images } : null, panels: [] }),
+  openAi: (draft, data, images, files, links) => set({ aiOpen: true, aiDraft: draft || images?.length || files?.length || links?.length ? { text: draft ?? '', data, images, files, links } : null, panels: [] }),
   closeAi: () => set({ aiOpen: false, aiDraft: null }),
   takeDraft: () => {
     const draft = get().aiDraft;

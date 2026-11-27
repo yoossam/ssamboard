@@ -1,4 +1,4 @@
-import { BLOCK_TYPES, COLUMN_TYPES, FORM_QUESTION_TYPES, MEMO_COLORS, PLACE_HINTS } from '@jarvis/shared';
+import { BLOCK_TYPES, COLUMN_TYPES, FORM_QUESTION_TYPES, MEMO_COLORS, PLACE_HINTS, TITLE_COLORS } from '@jarvis/shared';
 import type { LlmTool } from '../llm/adapter';
 
 // AI가 쓸 수 있는 도구(ONE-3). 읽기 도구는 바로 실행하고, 쓰기 도구는 실행하지 않고 변경 계획에 담는다(ONE-5).
@@ -120,11 +120,11 @@ export const WRITE_TOOLS: LlmTool[] = [
   {
     name: 'update_block',
     description:
-      '블록의 제목을 바꾸거나, 고정하거나(pinned), 다른 모서리로 옮기거나(position), 메모의 종이 색을 바꾸거나(color), ' +
+      '블록의 제목을 바꾸거나, 고정하거나(pinned), 다른 모서리로 옮기거나(position), 바탕색(color — 메모는 종이 색, 다른 블록은 바탕)이나 제목 글자색(title_color)을 바꾸거나, ' +
       '화면 블록의 그리기 코드(code)·꾸밈(css, 각각 고친 전체를 준다)이나 받을 자료(data)를 바꾸는 단계를 계획에 담는다. id는 get_board로 확인한다.',
     input_schema: {
       type: 'object',
-      properties: { id: { type: 'string' }, title: { type: 'string' }, pinned: { type: 'boolean' }, color: memoColor, code: viewCode, css: viewCss, data: viewData, position },
+      properties: { id: { type: 'string' }, title: { type: 'string' }, pinned: { type: 'boolean' }, color: memoColor, title_color: { type: 'string', enum: [...TITLE_COLORS] }, code: viewCode, css: viewCss, data: viewData, position },
       required: ['id'],
     },
   },

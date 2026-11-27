@@ -40,7 +40,7 @@
 | BRD-5 | ✅ | `apps/web/src/board/blocks.tsx` — 7종. 메모는 붙임쪽지처럼 쓴다: 종이 색 7가지(`config.color`, 이름은 shared `MEMO_COLORS`·색 값은 `styles.css`), 배치 편집 없이 머리띠로 옮기고 모서리로 크기 조절(최소 2×2칸), AI 도구 `create_block`·`update_block`의 `color` — `apps/web/src/board/memo.tsx`, `Board.tsx`의 `MemoCard` |
 | BRD-5a | ✅ | **AI 화면 블록(view)** — AI가 쓴 그리기 코드(`code`: `render(data, size)`가 HTML·SVG 글자를 돌려줌)와 꾸밈(`css`)을 격리해 돌린다. 보드 → 바깥 틀(스크립트 없음) → 안쪽 틀(CSP sandbox, nonce 스크립트 하나) → 일꾼(Worker, AI 코드). 돌려준 글자는 허용 목록으로 걸러 붙이고, 자료는 브라우저가 넣어 준다(표 집계·할 일·일정). 가두는 방법과 이유는 `apps/api/src/boards/view-frame.ts` 맨 위, 화면은 `apps/web/src/board/view.tsx`, AI 안내는 `ai.service.ts`의 `VIEW_GUIDE`, 도구는 `create_block`·`update_block`의 `code`·`css`·`data` |
 | BRD-6 | ✅ | 더보기 → 배치 편집 |
-| BRD-7 | ◐ | 제목 변경, 메모의 종이 색. 블록 `config`는 보낸 키만 바뀐다(얕은 병합) — `boards.service.ts`의 `updateBlock` |
+| BRD-7 | ◐ | 제목 변경, 메모의 종이 색. **꾸미기**(2026-11-27): 모든 블록의 바탕(`config.bg`, 메모는 `config.color`)·제목 글자색(`config.title_color`) — 블록 머리줄 팔레트 단추(`board/memo.tsx` 의 `BlockStyleButton`), AI `update_block` 의 `color`·`title_color`. 보드 바탕색은 `boards.theme.bg`(마이그레이션 `005_board_theme`, 머리말 팔레트 `board/boardStyle.tsx`). 모든 블록을 배치 편집 없이 머리줄로 옮기고 모서리로 크기 조절(고정한 블록은 자리만 붙박이, 크기는 조절). 머리말 높이 40px·여백 줄임. 블록 `config`는 보낸 키만 바뀐다(얕은 병합) — `boards.service.ts`의 `updateBlock` |
 | BRD-8 | ✅ | UTC 저장, 사용자 시간대 표시 — `apps/web/src/lib/format.ts` |
 | BRD-9 | — | P2 |
 
@@ -48,7 +48,7 @@
 
 | ID | 상태 | 위치와 메모 |
 |---|---|---|
-| LLM-2 | ✅ | AI 창의 "자료", 파일 올리기, Google 시트. **이미지 첨부**(2026-11-27): AI 창·아래 입력줄의 이미지 단추·붙여넣기·끌어 놓기, 한 번에 4장, 화면에서 긴 변 1568px JPEG 로 줄여 보냄(`apps/web/src/lib/images.ts`), 서버 검사 `ai.service.ts` 의 `imageBlocks`(형식·크기), 저장하지 않고 이번 요청에만 Claude 로 보냄(대화 기록에는 '이미지 N장 첨부'만), 이미지 속 글도 데이터로만 다룸 |
+| LLM-2 | ✅ | AI 창의 "자료", 파일 올리기, Google 시트. **이미지 첨부**(2026-11-27): AI 창·아래 입력줄의 이미지 단추·붙여넣기·끌어 놓기, 한 번에 4장, 화면에서 긴 변 1568px JPEG 로 줄여 보냄(`apps/web/src/lib/images.ts`), 서버 검사 `ai.service.ts` 의 `imageBlocks`(형식·크기). **파일 첨부**(같은 날): 클립 단추로 PDF(문서 블록 그대로)·HWPX·DOCX·XLSX·PPTX·TXT·CSV·MD(서버가 글로 바꿈, `ai/attachments.ts`), 한 번에 5개·10MB, HWP·DOC·XLS·PPT 는 다른 형식으로 저장하라고 안내, 압축은 실제로 풀며 60MB 까지만. **구글 문서·시트·프레젠테이션 링크**: 따로 입력칸을 두지 않는다 — 붙여넣기·끌어 놓기한 것이 구글 링크뿐이면 링크 첨부(칩)로, 파일이면 파일 첨부로 저절로 알아본다(`lib/images.ts` 의 `googleLinksOnly`, 요청의 `links`). 요청 글 속 링크도 함께 읽는다. 링크를 '링크가 있는 모든 사용자' 공유 문서만 내보내기 주소로 읽음(구글 연결 없이, 2MB, 리디렉트는 docs.google.com·*.googleusercontent.com 만), 못 읽으면 까닭을 AI 가 알림. 저장하지 않고 이번 요청에만 Claude 로 보냄(대화 기록에는 '이미지 N장 첨부'만), 이미지 속 글도 데이터로만 다룸 |
 | LLM-3 | ✅ | 표 형식은 서버 파싱 + 앞 200행으로 제안(`uploads/uploads.service.ts`), 비정형은 `create_table` 도구(최대 200행) |
 | LLM-4 | ✅ | 미리보기에서 이름·타입 수정, 기존 표에 추가 — `PreviewEditor`, `POST /api/tables/:id/append` |
 | LLM-5 | ✅ | 표 상세 → 설정 → 보드에 배치 |

@@ -306,4 +306,11 @@ create table app_meta (
 );
 `,
   },
+  {
+    // 보드 꾸미기(2026-11-27): 바탕색 등. 블록의 바탕·제목 색은 blocks.config(bg, title_color)에 둔다.
+    name: '005_board_theme',
+    sql: /* sql */ `
+alter table boards add column theme jsonb not null default '{}';
+`,
+  },
 ];

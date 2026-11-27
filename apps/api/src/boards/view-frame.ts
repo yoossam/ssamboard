@@ -81,7 +81,7 @@ export function embeddedFontCss(fontDir: string): string {
 
 const baseCss = (fontCss: string): string => `
 ${fontCss}
-:root{--ink:#14171f;--sub:#5b6472;--line:#dadfe7;--rule:#eef0f3;--card:#ffffff;--ground:#f2f4f7;--accent:#1f4fd8;--tint:#e8eefc;--danger:#b42318;--ok:#157f3b;--c1:#1f4fd8;--c2:#0f9d8a;--c3:#e08a00;--c4:#b4338a;--c5:#6b4fd8;--c6:#8a94a6}
+:root{--ink:#3e481d;--sub:#5a6b2a;--line:#dce3ce;--rule:#e9eddd;--card:#ffffff;--ground:#f0f0e0;--accent:#3e481d;--tint:rgb(62 72 29 / 0.08);--danger:#cc0000;--ok:#3d7a00;--c1:#5a6b2a;--c2:#0f9d8a;--c3:#e08a00;--c4:#b4338a;--c5:#6b4fd8;--c6:#8a94a6}
 *{box-sizing:border-box}
 html,body{margin:0;height:100%}
 body{font-family:'A2Z','Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;font-size:14px;line-height:1.5;color:var(--ink);background:var(--card);overflow:auto;-webkit-font-smoothing:antialiased;font-synthesis-weight:none}

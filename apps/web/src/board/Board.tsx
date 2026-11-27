@@ -1,19 +1,20 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import GridLayout from 'react-grid-layout';
-import { GRID_COLS, memoColor, MIN_BLOCK_SIZE, mobileOrder, type BlockDto, type BoardDto, type GridPos } from '@jarvis/shared';
+import { blockBg, boardBg, GRID_COLS, memoColor, MIN_BLOCK_SIZE, mobileOrder, titleColor, type BlockDto, type BoardDto, type GridPos } from '@jarvis/shared';
 import { BLOCK_ICON, Icon } from '../components/Icon';
 import { Button, Empty, IconButton, useIsPhone, useSize } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
 import { keys, queryClient, refresh, useBoard } from '../lib/data';
 import { dateLabel } from '../lib/format';
-import { imageFilesFrom, MAX_IMAGES, shrinkImage } from '../lib/images';
+import { FILE_ACCEPT, filesFrom, googleLinksOnly, MAX_FILES, MAX_IMAGES, readAttachedFile, shrinkImage, splitFiles } from '../lib/images';
 import { useApp } from '../lib/store';
 import { BlockBody, BlockCount, TileLines } from './blocks';
-import { MemoColorButton } from './memo';
+import { BlockStyleButton } from './memo';
+import { BoardStyleButton } from './boardStyle';
 
 // 한 페이지 보드(ONE-1). PC는 24칸 격자에 블록을 놓고, 휴대폰은 2열 타일로 보여준다.
 
-const GAP = 16;
+const GAP = 10;
 /** 화면 높이를 격자 16줄로 나눈다. 기본 배치(블록 높이 8줄 × 2단)가 스크롤 없이 한 화면에 들어온다. */
 const ROWS_PER_SCREEN = 16;
 /** 화면이 낮아도 한 줄은 이만큼은 된다(그보다 낮으면 보드가 세로로 스크롤된다). */
@@ -30,14 +31,13 @@ interface Item extends GridPos {
 }
 
 /**
- * 메모(붙임쪽지)는 배치 편집을 켜지 않아도 머리띠를 끌어 옮기고 모서리를 끌어 크기를 바꾼다.
- * 다른 블록은 배치 편집 중에만 움직인다. 고정한 블록은 어느 쪽이든 움직이지 않는다.
+ * 모든 블록은 배치 편집을 켜지 않아도 머리줄을 끌어 옮기고 모서리를 끌어 크기를 바꾼다(2026-11-27 "크기를 자유자재로").
+ * 고정한 블록은 자리만 붙박이고 크기는 바꿀 수 있다.
  */
 const toItems = (blocks: BlockDto[]): Item[] =>
   blocks.map((b) => {
     const min = MIN_BLOCK_SIZE[b.type] ?? MIN_BLOCK_SIZE.tasks;
-    const free = b.type === 'memo' ? { isDraggable: !b.pinned, isResizable: !b.pinned } : {};
-    return { i: b.id, ...b.layout_lg, static: b.pinned, minW: min.w, minH: min.h, ...free };
+    return { i: b.id, ...b.layout_lg, minW: min.w, minH: min.h, isDraggable: !b.pinned, isResizable: true };
   });
 const samePos = (a: GridPos, b: GridPos) => a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
 
@@ -61,16 +61,17 @@ function TopBar() {
   const setEditMode = useApp((s) => s.setEditMode);
   return (
     <header className="z-20 shrink-0 border-b bg-card">
-      <div className="flex h-14 items-center justify-between px-1.5">
-        <IconButton icon="menu" label="메뉴" onClick={() => open({ kind: 'menu' })} />
-        <div className="flex min-w-0 items-baseline gap-2">
-          <h1 className="text-xl font-bold">쌤보드</h1>
-          <span className="truncate text-sm text-sub">{dateLabel(new Date())}</span>
-        </div>
-        <IconButton icon="more" label="더보기" onClick={() => open({ kind: 'more' })} />
+      {/* 머리말은 얇게(2026-11-27 "로고 최소화, 화면 전체를 다 쓰게") — 이름·날짜는 작게, 단추는 오른쪽에 모은다 */}
+      <div className="flex h-10 items-center gap-1 px-1">
+        <IconButton icon="menu" label="메뉴" size={36} onClick={() => open({ kind: 'menu' })} />
+        <h1 className="text-sm font-bold text-accent">쌤보드</h1>
+        <span className="min-w-0 truncate text-xs text-sub">{dateLabel(new Date())}</span>
+        <span className="flex-1" />
+        <BoardStyleButton />
+        <IconButton icon="more" label="더보기" size={36} onClick={() => open({ kind: 'more' })} />
       </div>
       {editMode && (
-        <div className="flex h-14 items-center justify-between gap-3 border-t border-rule bg-tint pr-1.5 pl-4">
+        <div className="flex h-11 items-center justify-between gap-3 border-t border-rule bg-tint pr-1.5 pl-4">
           <p className="min-w-0 truncate text-sm font-medium text-accent">배치 편집 중 · 머리줄을 끌어 옮기고 모서리로 크기를 조절합니다</p>
           <Button icon="check" tone="primary" onClick={() => setEditMode(false)}>
             완료
@@ -105,10 +106,10 @@ function MemoCard({ block }: { block: BlockDto }) {
           className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-left"
         >
           {isSelected && <Icon name="check" size={16} className="shrink-0 text-accent" />}
-          <h2 className="truncate text-[15px] font-bold">{block.title}</h2>
+          <h2 data-title-color={titleColor(block.config.title_color)} className="truncate text-[15px] font-bold">{block.title}</h2>
         </button>
         <span className="no-drag flex shrink-0 items-center">
-          <MemoColorButton block={block} />
+          <BlockStyleButton block={block} />
           {editMode && (
             <button type="button" aria-label="블록 편집" title="블록 편집" onClick={() => open({ kind: 'block-edit', blockId: block.id })} className="flex size-8 shrink-0 items-center justify-center rounded-lg text-ink/60 hover:bg-black/5 hover:text-ink">
               <Icon name="edit" size={18} />
@@ -136,25 +137,35 @@ function BlockCard({ block }: { block: BlockDto }) {
   const isSelected = useApp((s) => s.selected.includes(block.id));
   const toggleSelected = useApp((s) => s.toggleSelected);
   const open = useApp((s) => s.open);
-  const draggable = editMode && !block.pinned;
+  const pressedAt = useRef<{ x: number; y: number } | null>(null);
+  const bg = blockBg(block);
   return (
-    <article className={`flex h-full flex-col overflow-hidden rounded-xl border bg-card ${isSelected ? 'border-accent ring-2 ring-accent/25' : ''}`}>
-      <header className={`flex h-[52px] shrink-0 items-center gap-1 border-b border-rule pr-1 pl-4 ${draggable ? 'block-drag' : ''}`}>
+    <article
+      data-memo={bg === 'white' ? undefined : bg}
+      className={`memo-card flex h-full flex-col overflow-hidden rounded-xl border ${bg === 'white' ? 'bg-card' : 'memo-paper'} ${isSelected ? 'border-accent! ring-2 ring-accent/25' : ''}`}
+    >
+      <header className={`flex h-11 shrink-0 items-center gap-1 border-b border-rule pr-1 pl-3 ${block.pinned ? '' : 'block-drag'}`}>
         <button
           type="button"
-          disabled={editMode}
           aria-pressed={isSelected}
-          title={editMode ? undefined : isSelected ? 'AI 컨텍스트에서 빼기' : 'AI에 이 블록 알려주기'}
-          onClick={() => toggleSelected(block.id)}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:cursor-[inherit]"
+          title={isSelected ? 'AI 컨텍스트에서 빼기' : 'AI에 이 블록 알려주기'}
+          onPointerDown={(e) => (pressedAt.current = { x: e.clientX, y: e.clientY })}
+          onClick={(e) => {
+            // 머리줄을 끌어 옮긴 끝에 생기는 누름은 고르기로 치지 않는다(자판으로 누른 것은 detail 이 0 이다).
+            const from = pressedAt.current;
+            if (e.detail !== 0 && from && Math.hypot(e.clientX - from.x, e.clientY - from.y) > 5) return;
+            toggleSelected(block.id);
+          }}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
         >
-          <Icon name={isSelected ? 'check' : BLOCK_ICON[block.type]} className="text-accent" />
-          <h2 className="truncate text-[17px] font-bold">{block.title}</h2>
+          <Icon name={isSelected ? 'check' : BLOCK_ICON[block.type]} size={18} className="text-accent" />
+          <h2 data-title-color={titleColor(block.config.title_color)} className="truncate text-[17px] font-bold">{block.title}</h2>
           <BlockCount block={block} />
         </button>
-        <span className="no-drag flex shrink-0">
-          {editMode && <IconButton icon="edit" label="블록 편집" onClick={() => open({ kind: 'block-edit', blockId: block.id })} />}
-          <IconButton icon="pin" label={block.pinned ? '고정 해제' : '고정'} active={block.pinned} onClick={() => togglePin(block)} />
+        <span className="no-drag flex shrink-0 items-center">
+          <BlockStyleButton block={block} />
+          {editMode && <IconButton icon="edit" label="블록 편집" size={32} onClick={() => open({ kind: 'block-edit', blockId: block.id })} />}
+          <IconButton icon="pin" label={block.pinned ? '고정 해제(자리 고정 풀기)' : '자리 고정'} size={32} active={block.pinned} onClick={() => togglePin(block)} />
         </span>
       </header>
       <BlockBody block={block} />
@@ -182,7 +193,7 @@ function DesktopBoard({ blocks }: { blocks: BlockDto[] }) {
   useEffect(() => () => clearTimeout(timer.current), []);
 
   const onLayoutChange = (next: Item[]) => {
-    // 배치 편집 밖에서는 메모를 직접 끌어 놓았을 때만 받아들인다(격자는 끌어 놓은 바로 뒤에 이 함수를 부른다).
+    // 배치 편집 밖에서는 직접 끌어 놓거나 크기를 바꾼 때만 받아들인다(격자는 그 바로 뒤에 이 함수를 부른다).
     if (!editMode && Date.now() - droppedAt.current > 1000) return;
     const moved = new Map(next.map((n) => [n.i, n]));
     setItems(
@@ -222,8 +233,8 @@ function DesktopBoard({ blocks }: { blocks: BlockDto[] }) {
           margin={[GAP, GAP]}
           containerPadding={[0, 0]}
           layout={items}
-          isDraggable={editMode}
-          isResizable={editMode}
+          isDraggable
+          isResizable
           draggableHandle=".block-drag"
           draggableCancel=".no-drag"
           compactType="vertical"
@@ -329,7 +340,7 @@ function PhoneBoard({ blocks }: { blocks: BlockDto[] }) {
           <div
             key={b.id}
             data-tile={b.id}
-            data-memo={b.type === 'memo' ? memoColor(b.config.color) : undefined}
+            data-memo={b.type === 'memo' ? memoColor(b.config.color) : blockBg(b) === 'white' ? undefined : blockBg(b)}
             role="button"
             tabIndex={0}
             onPointerDown={(e) => onPointerDown(e, b.id)}
@@ -359,16 +370,21 @@ function AiBar() {
   const input = useRef<HTMLInputElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
-  // 이미지를 고르거나 붙여넣으면 줄여서 AI 창으로 넘긴다. 쓴 말이 있으면 함께 보내고, 없으면 붙여 둔 채 할 말을 기다린다.
-  const sendImages = async (files: File[]) => {
-    if (files.length === 0) return;
-    try {
-      const images = await Promise.all(files.slice(0, MAX_IMAGES).map(shrinkImage));
-      openAi(text.trim() || undefined, undefined, images);
-      setText('');
-    } catch (e) {
-      useApp.getState().toast(errorMessage(e), 'error');
-    }
+  // 파일·이미지를 고르거나 붙여넣으면 AI 창으로 넘긴다. 쓴 말이 있으면 함께 보내고, 없으면 붙여 둔 채 할 말을 기다린다.
+  const sendImages = async (all: File[]) => {
+    if (all.length === 0) return;
+    // 못 읽는 파일(옛 한글 HWP 등)은 빼고 알려 주고, 읽은 것만 넘긴다.
+    const { images: pics, others } = splitFiles(all);
+    const [images, files] = await Promise.all([
+      Promise.allSettled(pics.slice(0, MAX_IMAGES).map(shrinkImage)),
+      Promise.allSettled(others.slice(0, MAX_FILES).map(readAttachedFile)),
+    ]);
+    const okImages = images.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []));
+    const okFiles = files.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []));
+    for (const r of [...images, ...files]) if (r.status === 'rejected') useApp.getState().toast(errorMessage(r.reason), 'error');
+    if (okImages.length + okFiles.length === 0) return;
+    openAi(text.trim() || undefined, undefined, okImages, okFiles);
+    setText('');
   };
 
   useEffect(() => {
@@ -402,22 +418,30 @@ function AiBar() {
         value={text}
         onChange={(e) => setText(e.target.value)}
         onPaste={(e) => {
-          const files = imageFilesFrom(e.clipboardData);
-          if (files.length === 0) return;
+          const pasted = filesFrom(e.clipboardData);
+          if (pasted.length > 0) {
+            e.preventDefault();
+            void sendImages(pasted);
+            return;
+          }
+          // 구글 문서·시트 링크만 붙여 넣으면 첨부(링크)로 AI 창에 넘긴다
+          const found = googleLinksOnly(e.clipboardData.getData('text'));
+          if (found.length === 0) return;
           e.preventDefault();
-          void sendImages(files);
+          openAi(text.trim() || undefined, undefined, [], [], found);
+          setText('');
         }}
         placeholder="무엇을 도와드릴까요?"
         aria-label="AI에게 요청"
         className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none"
       />
-      <button type="button" aria-label="이미지 붙이기" title="이미지 붙이기" onClick={() => fileInput.current?.click()} className="flex size-10 shrink-0 items-center justify-center rounded-full text-sub hover:bg-tint hover:text-accent">
-        <Icon name="image" size={20} />
+      <button type="button" aria-label="파일·이미지 첨부" title="파일·이미지 첨부(PDF·한글·워드·엑셀·사진)" onClick={() => fileInput.current?.click()} className="flex size-10 shrink-0 items-center justify-center rounded-full text-sub hover:bg-tint hover:text-accent">
+        <Icon name="clip" size={20} />
       </button>
       <input
         ref={fileInput}
         type="file"
-        accept="image/*"
+        accept={FILE_ACCEPT}
         multiple
         hidden
         onChange={(e) => {
@@ -451,9 +475,9 @@ export function Board() {
 
   const blocks = board?.blocks ?? [];
   return (
-    <div className="flex h-dvh flex-col" style={{ paddingRight: sidePanel ? AI_PANEL_WIDTH : 0 }}>
+    <div data-board-bg={boardBg(board?.theme?.bg)} className="flex h-dvh flex-col" style={{ paddingRight: sidePanel ? AI_PANEL_WIDTH : 0 }}>
       <TopBar />
-      <main className={`min-h-0 flex-1 overflow-x-hidden overflow-y-auto ${phone ? 'p-3' : 'p-4'}`}>
+      <main className={`min-h-0 flex-1 overflow-x-hidden overflow-y-auto ${phone ? 'p-2' : 'p-2.5'}`}>
         {error ? (
           <Empty>{errorMessage(error)}</Empty>
         ) : !board ? (
@@ -472,7 +496,7 @@ export function Board() {
         )}
       </main>
       {/* AI 창이 열려 있어도 자리는 그대로 둔다. 보드 높이가 달라져 블록이 출렁이지 않게 한다. */}
-      <div className={`shrink-0 ${phone ? 'px-3 pt-1 pb-[max(12px,env(safe-area-inset-bottom))]' : 'px-4 pt-1 pb-4'} ${aiOpen ? 'invisible' : ''}`}>
+      <div className={`shrink-0 ${phone ? 'px-3 pt-1 pb-[max(12px,env(safe-area-inset-bottom))]' : 'px-4 pt-0.5 pb-2.5'} ${aiOpen ? 'invisible' : ''}`}>
         <AiBar />
       </div>
     </div>

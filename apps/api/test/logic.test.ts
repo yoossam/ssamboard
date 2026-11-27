@@ -133,3 +133,79 @@ describe('AI 창 이미지 첨부', () => {
   assert.throws(() => imageBlocks('nope'), /형식이 올바르지/);
 });
 });
+
+// ── AI 창 첨부 파일·구글 링크(2026-11-27) ─────────────────────────────────────
+import JSZip from 'jszip';
+import { exportUrl, findGoogleLinks, readAttachments, readGoogleLink } from '../src/ai/attachments';
+
+const zipB64 = async (files: Record<string, string>) => {
+  const zip = new JSZip();
+  for (const [name, body] of Object.entries(files)) zip.file(name, body);
+  return (await zip.generateAsync({ type: 'nodebuffer' })).toString('base64');
+};
+const b64 = (s: string) => Buffer.from(s).toString('base64');
+
+describe('AI 창 첨부 파일', () => {
+  it('PDF 는 문서 블록으로, 글·워드·한글(HWPX)·파워포인트는 글로 바꾼다', async () => {
+    const pdf = b64('%PDF-1.4 fake');
+    const docx = await zipB64({ 'word/document.xml': '<w:document><w:body><w:p><w:r><w:t>가정통신문</w:t></w:r></w:p><w:p><w:r><w:t xml:space="preserve">12월 3일 &amp; 현장체험</w:t></w:r></w:p></w:body></w:document>' });
+    const hwpx = await zipB64({ 'Contents/section0.xml': '<hs:sec><hp:p><hp:run><hp:t>학부모 상담 안내</hp:t></hp:run></hp:p></hs:sec>' });
+    const pptx = await zipB64({ 'ppt/slides/slide1.xml': '<p:sld><a:p><a:r><a:t>1학기 계획</a:t></a:r></a:p></p:sld>' });
+    const { pdfs, texts } = await readAttachments([
+      { name: '공문.pdf', data: pdf },
+      { name: '메모.txt', data: b64('준비물: 리코더') },
+      { name: '안내.docx', data: docx },
+      { name: '상담.hwpx', data: hwpx },
+      { name: '계획.pptx', data: pptx },
+    ]);
+    assert.deepEqual(pdfs, [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdf }, title: '공문.pdf' }]);
+    assert.deepEqual(texts.map((t) => t.text), ['준비물: 리코더', '가정통신문\n12월 3일 & 현장체험', '학부모 상담 안내', '[슬라이드 1]\n1학기 계획']);
+  });
+  it('읽을 수 없는 형식·가짜 PDF·너무 많은 파일은 까닭과 함께 거절한다', async () => {
+    await assert.rejects(readAttachments([{ name: '공문.hwp', data: b64('x') }]), /PDF 나 HWPX/);
+    await assert.rejects(readAttachments([{ name: '가짜.pdf', data: b64('hello') }]), /PDF 파일이 아닙니다/);
+    await assert.rejects(readAttachments([{ name: '실행.exe', data: b64('MZ') }]), /첨부할 수 있는 파일/);
+    await assert.rejects(readAttachments(Array(6).fill({ name: 'a.txt', data: b64('a') })), /5개까지/);
+  });
+});
+
+describe('구글 문서·시트 링크', () => {
+  it('링크에서 종류·id·시트 탭을 찾고, 내보내기 주소는 새로 만든다(같은 파일은 한 번, 3개까지)', () => {
+    const id = '1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789';
+    const links = findGoogleLinks(`이거 봐 https://docs.google.com/spreadsheets/d/${id}/edit#gid=42 와 https://docs.google.com/document/d/${id}x/edit?usp=sharing 그리고 https://docs.google.com/spreadsheets/d/${id}/view`);
+    assert.deepEqual(links.map((l) => [l.kind, l.gid]), [['spreadsheets', '42'], ['document', undefined]]);
+    assert.equal(exportUrl(links[0]), `https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=42`);
+    assert.equal(exportUrl(links[1]), `https://docs.google.com/document/d/${id}x/export?format=txt`);
+    assert.deepEqual(findGoogleLinks('https://evil.example/document/d/123456789012345678901234'), []);
+  });
+  it('공개 문서만 읽고, 로그인 화면·다른 주소로 넘기면 읽지 않는다', async () => {
+    const link = findGoogleLinks('https://docs.google.com/document/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012/edit')[0];
+    const res = (status: number, headers: Record<string, string>, body = '') => new Response(status >= 300 && status < 400 ? null : body, { status, headers });
+    const seq = (...list: Response[]) => (async () => list.shift()!) as unknown as typeof fetch;
+    assert.deepEqual(
+      await readGoogleLink(link, seq(res(307, { location: 'https://doc-0s.googleusercontent.com/export/abc' }), res(200, { 'content-type': 'text/plain' }, '알림장 내용'))),
+      { ok: true, label: '구글 문서', text: '알림장 내용' },
+    );
+    assert.equal((await readGoogleLink(link, seq(res(302, { location: 'https://accounts.google.com/ServiceLogin' })))).ok, false);
+    assert.equal((await readGoogleLink(link, seq(res(302, { location: 'http://169.254.169.254/' })))).ok, false);
+    assert.equal((await readGoogleLink(link, seq(res(200, { 'content-type': 'text/html' }, '<html>로그인</html>')))).ok, false);
+    // 크기를 알려 주지 않는 큰 응답은 받으면서 끊는다
+    const big = await readGoogleLink(link, seq(res(200, { 'content-type': 'text/plain' }, 'ㄱ'.repeat(1_000_000))));
+    assert.deepEqual(big, { ok: false, label: '구글 문서', reason: 'too_big' });
+  });
+});
+
+describe('첨부 압축 파일 크기', () => {
+  it('풀면 지나치게 커지는 엑셀도 읽지 않는다', async () => {
+    const zip = new JSZip();
+    zip.file('xl/worksheets/sheet1.xml', '<x>' + 'a'.repeat(70_000_000) + '</x>', { compression: 'DEFLATE' });
+    const data = (await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })).toString('base64');
+    await assert.rejects(readAttachments([{ name: '큰.xlsx', data }]), /너무 커서/);
+  });
+  it('풀면 지나치게 커지는 문서는 읽지 않는다', async () => {
+    const zip = new JSZip();
+    zip.file('word/document.xml', '<w:p>' + 'ㄱ'.repeat(25_000_000) + '</w:p>', { compression: 'DEFLATE' });
+    const data = (await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })).toString('base64');
+    await assert.rejects(readAttachments([{ name: '큰.docx', data }]), /너무 커서/);
+  });
+});

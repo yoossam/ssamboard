@@ -70,6 +70,31 @@ export const DEFAULT_MEMO_COLOR: MemoColor = 'yellow';
 /** 저장된 값이 없거나 모르는 색이면 기본색으로 본다. */
 export const memoColor = (v: unknown): MemoColor => ((MEMO_COLORS as readonly unknown[]).includes(v) ? (v as MemoColor) : DEFAULT_MEMO_COLOR);
 
+/**
+ * 블록 꾸미기(2026-11-27 "제목 색깔, 배경 색깔 수정"). 바탕은 메모 종이 색과 같은 이름을 쓴다(색 값은 styles.css 의 [data-memo]).
+ * config.bg(바탕), config.title_color(제목 글자색). 메모는 config.color 가 바탕이다(옛 값 그대로).
+ */
+export const TITLE_COLORS = ['default', 'blue', 'purple', 'pink', 'red', 'orange', 'green', 'teal'] as const;
+export type TitleColor = (typeof TITLE_COLORS)[number];
+export const TITLE_COLOR_LABEL: Record<TitleColor, string> = {
+  default: '기본', blue: '파랑', purple: '보라', pink: '분홍', red: '빨강', orange: '주황', green: '초록', teal: '청록',
+};
+export const titleColor = (v: unknown): TitleColor => ((TITLE_COLORS as readonly unknown[]).includes(v) ? (v as TitleColor) : 'default');
+/** 메모가 아닌 블록의 바탕. 처음은 흰색. */
+export const blockBg = (block: { type: string; config: Record<string, any> }): MemoColor =>
+  block.type === 'memo' ? memoColor(block.config.color) : (MEMO_COLORS as readonly unknown[]).includes(block.config.bg) ? (block.config.bg as MemoColor) : 'white';
+
+/** 보드 전체 바탕(boards.theme.bg). 색 값은 styles.css 의 [data-board-bg]. */
+export const BOARD_BGS = ['gray', 'white', 'cream', 'mint', 'sky', 'lavender', 'peach', 'slate'] as const;
+export type BoardBg = (typeof BOARD_BGS)[number];
+export const BOARD_BG_LABEL: Record<BoardBg, string> = {
+  gray: '기본', white: '흰색', cream: '크림', mint: '민트', sky: '하늘', lavender: '라벤더', peach: '복숭아', slate: '어두운 회색',
+};
+export const boardBg = (v: unknown): BoardBg => ((BOARD_BGS as readonly unknown[]).includes(v) ? (v as BoardBg) : 'gray');
+export interface BoardTheme {
+  bg?: BoardBg;
+}
+
 export interface BlockDto {
   id: string;
   type: BlockType;
@@ -83,6 +108,8 @@ export interface BlockDto {
 export interface BoardDto {
   id: string;
   name: string;
+  /** 보드 꾸미기(바탕색) */
+  theme: BoardTheme;
   blocks: BlockDto[];
 }
 

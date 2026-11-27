@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Res } from '@nestjs/common';
-import { BLOCK_TYPES, readViewData, VIEW_CODE_MAX, VIEW_CSS_MAX, type BlockDto, type BoardDto, type EventDto, type TaskDto } from '@jarvis/shared';
+import { BLOCK_TYPES, readViewData, VIEW_CODE_MAX, VIEW_CSS_MAX, type BlockDto, type BoardDto, type EventDto, type TaskDto, MEMO_COLORS, TITLE_COLORS, BOARD_BGS, type BoardTheme } from '@jarvis/shared';
 import type { Response } from 'express';
 import { Auth, type AuthCtx } from '../auth/auth.types';
 import { bad, isoOrNull, notFound, obj, oneOf, optStr, str, uuid } from '../common/http';
@@ -24,6 +24,9 @@ function sendHtml(res: Response, html: string, csp: string, extra: Record<string
  */
 function checkConfig(config: Record<string, any> | undefined): Record<string, any> | undefined {
   if (!config) return config;
+  // 꾸미기 값은 정해 둔 이름만(화면이 그 이름으로 색을 고른다 — 아무 글자나 받으면 CSS 로 새지 않게).
+  if (config.bg !== undefined && !(MEMO_COLORS as readonly unknown[]).includes(config.bg)) bad('바탕색이 잘못됐습니다.');
+  if (config.title_color !== undefined && !(TITLE_COLORS as readonly unknown[]).includes(config.title_color)) bad('제목 색이 잘못됐습니다.');
   if (config.code !== undefined && (typeof config.code !== 'string' || config.code.length > VIEW_CODE_MAX)) bad(`그리기 코드는 ${VIEW_CODE_MAX.toLocaleString()}자까지입니다.`);
   if (config.css !== undefined && (typeof config.css !== 'string' || config.css.length > VIEW_CSS_MAX)) bad(`꾸밈(CSS)은 ${VIEW_CSS_MAX.toLocaleString()}자까지입니다.`);
   return config.data === undefined ? config : { ...config, data: readViewData(config.data) };
@@ -43,6 +46,13 @@ export class BoardsController {
   async board(@Auth() ctx: AuthCtx, @Param('id') id: string): Promise<BoardDto> {
     await this.check(ctx.user.id, id);
     return this.boards.getBoard(ctx.user.id);
+  }
+
+  /** 보드 꾸미기(바탕색). */
+  @Patch('boards/:id/theme')
+  async theme(@Auth() ctx: AuthCtx, @Param('id') id: string, @Body() body: any): Promise<BoardTheme> {
+    await this.check(ctx.user.id, id);
+    return this.boards.setTheme(ctx.user.id, { bg: oneOf(body?.bg, '바탕색', BOARD_BGS) });
   }
 
   /** 블록 위치·크기·고정을 한 번에 저장한다. 화면은 변경 1초 뒤에 부른다(BRD-4). */

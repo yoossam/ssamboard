@@ -1,6 +1,6 @@
 import { useEffect, useState, type MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { MEMO_COLORS, MEMO_COLOR_LABEL, memoColor, type BlockDto, type BoardDto, type MemoColor } from '@jarvis/shared';
+import { blockBg, MEMO_COLORS, MEMO_COLOR_LABEL, TITLE_COLORS, TITLE_COLOR_LABEL, titleColor, type BlockDto, type BoardDto, type MemoColor, type TitleColor } from '@jarvis/shared';
 import { Icon } from '../components/Icon';
 import { api, errorMessage } from '../lib/api';
 import { keys, queryClient, refresh } from '../lib/data';
@@ -8,22 +8,50 @@ import { useApp } from '../lib/store';
 
 // 메모(붙임쪽지)의 종이 색. 색 이름은 shared 의 MEMO_COLORS, 색 값은 styles.css 의 [data-memo] 에 있다.
 
-/** 색은 누르자마자 바꾸고 저장한다. 서버는 config 를 보낸 키만 바꾸므로 메모 글과 서로 덮어쓰지 않는다. */
-export async function setMemoColor(block: BlockDto, color: MemoColor): Promise<void> {
-  if (memoColor(block.config.color) === color && block.config.color === color) return;
-  queryClient.setQueryData<BoardDto>(keys.board, (board) => board && { ...board, blocks: board.blocks.map((b) => (b.id === block.id ? { ...b, config: { ...b.config, color } } : b)) });
+/**
+ * 꾸미기 값(바탕·제목 색)은 누르자마자 바꾸고 저장한다. 서버는 config 를 보낸 키만 바꾸므로 메모 글과 서로 덮어쓰지 않는다.
+ * 메모의 바탕은 옛 이름 그대로 config.color, 다른 블록은 config.bg.
+ */
+export async function setBlockStyle(block: BlockDto, change: { bg?: MemoColor; title_color?: TitleColor }): Promise<void> {
+  const patch: Record<string, string> = {};
+  if (change.bg) patch[block.type === 'memo' ? 'color' : 'bg'] = change.bg;
+  if (change.title_color) patch.title_color = change.title_color;
+  queryClient.setQueryData<BoardDto>(keys.board, (board) => board && { ...board, blocks: board.blocks.map((b) => (b.id === block.id ? { ...b, config: { ...b.config, ...patch } } : b)) });
   try {
-    await api.patch(`/blocks/${block.id}`, { config: { color } });
+    await api.patch(`/blocks/${block.id}`, { config: patch });
   } catch (e) {
     useApp.getState().toast(errorMessage(e), 'error');
     void refresh('board');
   }
 }
 
+/** 제목 글자색 동그라미 한 줄. */
+export function TitleColorDots({ value, onPick }: { value: TitleColor; onPick: (color: TitleColor) => void }) {
+  return (
+    <div role="radiogroup" aria-label="제목 색" className="flex flex-wrap gap-2">
+      {TITLE_COLORS.map((color) => (
+        <button
+          key={color}
+          type="button"
+          role="radio"
+          aria-checked={color === value}
+          aria-label={TITLE_COLOR_LABEL[color]}
+          title={TITLE_COLOR_LABEL[color]}
+          data-title-color={color}
+          onClick={() => onPick(color)}
+          className={`title-dot flex size-8 shrink-0 items-center justify-center rounded-full ${color === value ? 'ring-2 ring-accent ring-offset-2' : ''}`}
+        >
+          {color === value && <Icon name="check" size={16} className="text-white" />}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** 색 동그라미 한 줄. 고른 색에는 테두리 고리가 생긴다. */
 export function MemoColorDots({ value, onPick }: { value: MemoColor; onPick: (color: MemoColor) => void }) {
   return (
-    <div role="radiogroup" aria-label="종이 색" className="flex flex-wrap gap-2">
+    <div role="radiogroup" aria-label="바탕색" className="flex flex-wrap gap-2">
       {MEMO_COLORS.map((color) => (
         <button
           key={color}
@@ -45,8 +73,8 @@ export function MemoColorDots({ value, onPick }: { value: MemoColor; onPick: (co
 
 const POPOVER_WIDTH = 306;
 
-/** 메모 머리띠의 색 단추. 누르면 그 아래에 색 동그라미가 뜬다(격자 칸이 좁아도 잘리지 않게 화면 맨 위 층에 그린다). */
-export function MemoColorButton({ block }: { block: BlockDto }) {
+/** 블록 머리띠의 꾸미기 단추(바탕·제목 색). 누르면 그 아래에 색 동그라미가 뜬다(격자 칸이 좁아도 잘리지 않게 화면 맨 위 층에 그린다). */
+export function BlockStyleButton({ block, className }: { block: BlockDto; className?: string }) {
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
   const open = at !== null;
 
@@ -80,25 +108,22 @@ export function MemoColorButton({ block }: { block: BlockDto }) {
       <button
         type="button"
         data-memo-colors=""
-        aria-label="종이 색"
-        title="종이 색"
+        aria-label="꾸미기(바탕·제목 색)"
+        title="꾸미기(바탕·제목 색)"
         aria-haspopup="true"
         aria-pressed={open}
         onClick={toggle}
-        className="memo-tool flex size-8 shrink-0 items-center justify-center rounded-lg text-ink/60 hover:bg-black/5 hover:text-ink"
+        className={className ?? 'memo-tool flex size-8 shrink-0 items-center justify-center rounded-lg text-ink/60 hover:bg-black/5 hover:text-ink'}
       >
         <Icon name="palette" size={18} />
       </button>
       {open &&
         createPortal(
           <div data-memo-colors="" className="anim-fade fixed z-[35] rounded-xl border bg-card p-3 shadow-lg" style={{ left: at.x, top: at.y, width: POPOVER_WIDTH }}>
-            <MemoColorDots
-              value={memoColor(block.config.color)}
-              onPick={(color) => {
-                setAt(null);
-                void setMemoColor(block, color);
-              }}
-            />
+            <p className="mb-2 text-xs font-medium text-sub">바탕</p>
+            <MemoColorDots value={blockBg(block)} onPick={(bg) => void setBlockStyle(block, { bg })} />
+            <p className="mt-3 mb-2 text-xs font-medium text-sub">제목 글자색</p>
+            <TitleColorDots value={titleColor(block.config.title_color)} onPick={(title_color) => void setBlockStyle(block, { title_color })} />
           </div>,
           document.body,
         )}

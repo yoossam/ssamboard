@@ -35,7 +35,7 @@ export interface UploadSuggestion {
 const pad = (n: number) => String(n).padStart(2, '0');
 
 /** 엑셀 셀을 글자로 바꾼다. 날짜는 ISO 8601로, 수식은 결과값으로. */
-function cellText(v: unknown): string {
+export function cellText(v: unknown): string {
   if (v === null || v === undefined) return '';
   if (v instanceof Date) {
     const date = `${v.getUTCFullYear()}-${pad(v.getUTCMonth() + 1)}-${pad(v.getUTCDate())}`;
@@ -54,7 +54,7 @@ function cellText(v: unknown): string {
 }
 
 /** CSV는 UTF-8로 읽고, 깨지면 엑셀이 흔히 쓰는 EUC-KR(CP949)로 다시 읽는다. */
-function decodeText(buffer: Buffer): string {
+export function decodeText(buffer: Buffer): string {
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(buffer);
   } catch {

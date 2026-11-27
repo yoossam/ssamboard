@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { BLOCK_LABEL, BLOCK_TYPES, DEFAULT_BLOCK_SIZE, GRID_COLS, GRID_MAX_H, placeBlock, type BlockDto, type BlockType, type BoardDto, type GridPos, type PlaceHint } from '@jarvis/shared';
+import { BLOCK_LABEL, BLOCK_TYPES, DEFAULT_BLOCK_SIZE, GRID_COLS, GRID_MAX_H, placeBlock, type BlockDto, type BlockType, type BoardDto, type GridPos, type PlaceHint, type BoardTheme } from '@jarvis/shared';
 import { bad } from '../common/http';
 import { Db, json, type Queryable } from '../db/db.service';
 
@@ -25,10 +25,10 @@ export class BoardsService {
   constructor(private readonly db: Db) {}
 
   /** MVP는 보드 1개. 처음 들어오면 기본 블록(일정·할 일·알림·메모)이 놓인 보드를 만든다. */
-  async currentBoard(userId: string, q: Queryable = this.db): Promise<{ id: string; name: string }> {
-    const existing = await q.one('select id, name from boards where user_id = $1 order by created_at limit 1', [userId]);
+  async currentBoard(userId: string, q: Queryable = this.db): Promise<{ id: string; name: string; theme: BoardTheme }> {
+    const existing = await q.one('select id, name, theme from boards where user_id = $1 order by created_at limit 1', [userId]);
     if (existing) return existing;
-    const board = (await q.one('insert into boards(user_id) values ($1) returning id, name', [userId]))!;
+    const board = (await q.one('insert into boards(user_id) values ($1) returning id, name, theme', [userId]))!;
     for (const type of ['events', 'tasks', 'notifications', 'memo'] as BlockType[]) {
       await this.createBlock(userId, { type }, q, null, board.id);
     }
@@ -42,6 +42,13 @@ export class BoardsService {
 
   async getBlock(userId: string, id: string, q: Queryable = this.db): Promise<BlockDto | null> {
     return q.one<BlockDto>(`select ${BLOCK_COLUMNS} from blocks where id = $1 and user_id = $2 and deleted_at is null`, [id, userId]);
+  }
+
+  /** 보드 꾸미기. 보낸 키만 바꾼다. */
+  async setTheme(userId: string, theme: BoardTheme): Promise<BoardTheme> {
+    const board = await this.currentBoard(userId);
+    const row = await this.db.one<{ theme: BoardTheme }>('update boards set theme = theme || $2::jsonb where id = $1 and user_id = $3 returning theme', [board.id, JSON.stringify(theme), userId]);
+    return row?.theme ?? {};
   }
 
   async getBoard(userId: string): Promise<BoardDto> {

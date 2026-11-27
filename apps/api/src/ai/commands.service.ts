@@ -23,8 +23,7 @@ import {
   type MemoColor,
   type PlaceHint,
   type TablePreview,
-  type ViewData,
-} from '@jarvis/shared';
+  type ViewData, TITLE_COLORS, TITLE_COLOR_LABEL, type TitleColor } from '@jarvis/shared';
 import type { UserRow } from '../auth/auth.types';
 import { BoardsService } from '../boards/boards.service';
 import { bad, isUuid, notFound } from '../common/http';
@@ -228,9 +227,13 @@ export class CommandsService {
         if (typeof input.pinned === 'boolean') notes.push((patch.pinned = input.pinned) ? '고정' : '고정 해제');
         if (hint(input.position)) notes.push(`${HINT_LABEL[(patch.position = hint(input.position)!)]}로 이동`);
         if (input.color !== undefined) {
-          if (block.type !== 'memo') return fail('color는 메모 블록에만 쓸 수 있습니다.');
+          // 메모는 종이 색(config.color), 다른 블록은 바탕(config.bg) — 반영할 때 나눈다(2026-11-27 꾸미기).
           if (!isMemoColor(input.color)) return fail(`color는 ${MEMO_COLORS.join(', ')} 중 하나입니다.`);
-          notes.push(`색 → ${MEMO_COLOR_LABEL[(patch.color = input.color as MemoColor)]}`);
+          notes.push(`바탕 → ${MEMO_COLOR_LABEL[(patch.color = input.color as MemoColor)]}`);
+        }
+        if (input.title_color !== undefined) {
+          if (!(TITLE_COLORS as readonly unknown[]).includes(input.title_color)) return fail(`title_color는 ${TITLE_COLORS.join(', ')} 중 하나입니다.`);
+          notes.push(`제목 색 → ${TITLE_COLOR_LABEL[(patch.title_color = input.title_color as TitleColor)]}`);
         }
         if (input.code !== undefined || input.css !== undefined || input.html !== undefined || input.data !== undefined) {
           if (block.type !== 'view') return fail('code·css·data는 화면 블록(view)에만 쓸 수 있습니다.');
@@ -414,8 +417,8 @@ export class CommandsService {
         return [{ kind: 'created', entity: 'blocks', id: b.id, label: `블록 "${b.title}"` }];
       }
       case 'update_block': {
-        const before = await q.one<{ title: string; pinned: boolean; layout_lg: GridPos; config: Record<string, any>; updated_at: Date }>(
-          'select title, pinned, layout_lg, config, updated_at from blocks where id = $1 and user_id = $2 and deleted_at is null',
+        const before = await q.one<{ title: string; pinned: boolean; layout_lg: GridPos; config: Record<string, any>; updated_at: Date; type: string }>(
+          'select title, pinned, layout_lg, config, updated_at, type from blocks where id = $1 and user_id = $2 and deleted_at is null',
           [i.id, uid],
         );
         if (!before) bad('고치려는 블록이 없어졌습니다.');
@@ -426,7 +429,8 @@ export class CommandsService {
         }
         // config 는 보낸 키만 바뀐다(얕은 병합). 되돌릴 때는 before.config 전체로 돌아간다.
         const config: Record<string, any> = {};
-        if (i.color) config.color = i.color;
+        if (i.color) config[before!.type === 'memo' ? 'color' : 'bg'] = i.color;
+        if (i.title_color) config.title_color = i.title_color;
         if (i.code !== undefined) config.code = i.code;
         if (i.css !== undefined) config.css = i.css;
         if (i.data) config.data = i.data;

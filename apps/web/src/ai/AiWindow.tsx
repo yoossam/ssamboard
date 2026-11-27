@@ -6,7 +6,7 @@ import { SafeText } from '../components/SafeText';
 import { Button, ButtonRow, compactInput, IconButton, inputClass, Notice, Tag, useIsPhone } from '../components/ui';
 import { api, errorMessage, streamAi } from '../lib/api';
 import { refresh, useBoard } from '../lib/data';
-import { imageFilesFrom, MAX_IMAGES, shrinkImage, type AttachedImage } from '../lib/images';
+import { droppedText, FILE_ACCEPT, filesFrom, googleLinksOnly, MAX_FILES, MAX_IMAGES, MAX_LINKS, readAttachedFile, shrinkImage, splitFiles, type AttachedFile, type AttachedImage, type AttachedLink } from '../lib/images';
 import { useApp } from '../lib/store';
 
 // 하나뿐인 AI 창(ONE-2). 대화와 실행을 모두 맡는다.
@@ -22,6 +22,8 @@ interface UserMsg {
   blocks: string[];
   /** 첨부한 이미지의 미리보기(data: 주소). 이 화면에서만 보이고 서버에는 남지 않는다. */
   images?: string[];
+  /** 첨부한 파일 이름 */
+  files?: string[];
 }
 interface AiMsg {
   id: number;
@@ -41,7 +43,7 @@ interface AiState {
   conversationId: string | undefined;
   busy: boolean;
   abort: AbortController | null;
-  send: (text: string, data: string, blockIds: string[], blockTitles: string[], images?: AttachedImage[]) => Promise<void>;
+  send: (text: string, data: string, blockIds: string[], blockTitles: string[], images?: AttachedImage[], files?: AttachedFile[], links?: AttachedLink[]) => Promise<void>;
   stop: () => void;
   patch: (id: number, change: Partial<AiMsg>) => void;
   reset: () => void;
@@ -60,15 +62,15 @@ export const useAi = create<AiState>()((set, get) => ({
     get().abort?.abort();
     set({ messages: [], conversationId: undefined, busy: false, abort: null });
   },
-  send: async (text, data, blockIds, blockTitles, images = []) => {
-    if (get().busy || (!text.trim() && images.length === 0)) return;
+  send: async (text, data, blockIds, blockTitles, images = [], files = [], links = []) => {
+    if (get().busy || (!text.trim() && images.length === 0 && files.length === 0 && links.length === 0)) return;
     const abort = new AbortController();
     const askId = ++seq;
     const replyId = ++seq;
     set((s) => ({
       busy: true,
       abort,
-      messages: [...s.messages, { id: askId, role: 'user', text: text.trim(), data, blocks: blockTitles, images: images.map((img) => img.preview) }, { id: replyId, role: 'assistant', text: '', tools: [], streaming: true, edits: {} }],
+      messages: [...s.messages, { id: askId, role: 'user', text: text.trim(), data, blocks: blockTitles, images: images.map((img) => img.preview), files: [...files.map((f) => f.name), ...links.map((l) => l.label)] }, { id: replyId, role: 'assistant', text: '', tools: [], streaming: true, edits: {} }],
     }));
     const patch = get().patch;
     const current = () => get().messages.find((m): m is AiMsg => m.id === replyId && m.role === 'assistant');
@@ -80,6 +82,8 @@ export const useAi = create<AiState>()((set, get) => ({
           context_block_ids: blockIds,
           conversation_id: get().conversationId,
           images: images.length > 0 ? images.map(({ media_type, data: b64 }) => ({ media_type, data: b64 })) : undefined,
+          files: files.length > 0 ? files.map(({ name, data: b64 }) => ({ name, data: b64 })) : undefined,
+          links: links.length > 0 ? links.map((l) => l.url) : undefined,
         },
         (event) => {
           const msg = current();
@@ -291,7 +295,7 @@ function Message({ msg }: { msg: Msg }) {
             <SafeText text={msg.text} className="[&_a]:text-white" />
           </div>
         )}
-        {(msg.blocks.length > 0 || msg.data) && (
+        {(msg.blocks.length > 0 || msg.data || (msg.files?.length ?? 0) > 0) && (
           <div className="flex max-w-[85%] flex-wrap justify-end gap-1">
             {msg.blocks.map((b) => (
               <Tag key={b} tone="accent">
@@ -299,6 +303,9 @@ function Message({ msg }: { msg: Msg }) {
               </Tag>
             ))}
             {msg.data && <Tag>자료 {msg.data.length.toLocaleString()}자</Tag>}
+            {msg.files?.map((name) => (
+              <Tag key={name}>📎 {name}</Tag>
+            ))}
           </div>
         )}
       </div>
@@ -334,26 +341,42 @@ function Composer({ blocks }: { blocks: BlockDto[] }) {
   const [data, setData] = useState('');
   const [showData, setShowData] = useState(false);
   const [images, setImages] = useState<AttachedImage[]>([]);
+  const [files, setFiles] = useState<AttachedFile[]>([]);
+  const [links, setLinks] = useState<AttachedLink[]>([]);
+  // 넣은 것이 구글 문서·시트 링크뿐이면 글이 아니라 첨부(링크)로 붙인다. 그 밖의 글·주소는 그대로 입력칸에 들어간다.
+  const attachLinks = (found: AttachedLink[]) => {
+    setLinks((now) => [...now, ...found.filter((l) => !now.some((x) => x.url === l.url))].slice(0, MAX_LINKS));
+    if (links.length + found.length > MAX_LINKS) setImageError(`링크는 한 번에 ${MAX_LINKS}개까지예요.`);
+  };
   const [imageError, setImageError] = useState('');
   const [shrinking, setShrinking] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
 
-  // 이미지 붙이기: 단추로 고르기·붙여넣기(Ctrl+V)·끌어 놓기. 보내기 전에 이 기기에서 줄인다(lib/images.ts).
-  const attach = async (files: File[]) => {
-    if (files.length === 0) return;
+  // 첨부: 단추로 고르기·붙여넣기(Ctrl+V)·끌어 놓기. 이미지는 이 기기에서 줄이고(lib/images.ts), 나머지 파일은 그대로 읽어 서버가 글로 바꾼다.
+  const attach = async (all: File[]) => {
+    if (all.length === 0) return;
     setImageError('');
-    const room = MAX_IMAGES - images.length;
-    if (room <= 0) return setImageError(`이미지는 한 번에 ${MAX_IMAGES}장까지 붙일 수 있습니다.`);
-    if (files.length > room) setImageError(`이미지는 한 번에 ${MAX_IMAGES}장까지라 ${room}장만 붙였습니다.`);
+    const { images: pics, others } = splitFiles(all);
+    const notes: string[] = [];
+    const roomImg = MAX_IMAGES - images.length;
+    const roomFile = MAX_FILES - files.length;
+    if (pics.length > roomImg) notes.push(`이미지는 한 번에 ${MAX_IMAGES}장까지예요.`);
+    if (others.length > roomFile) notes.push(`파일은 한 번에 ${MAX_FILES}개까지예요.`);
     setShrinking(true);
     try {
-      const made = await Promise.all(files.slice(0, room).map(shrinkImage));
-      setImages((now) => [...now, ...made].slice(0, MAX_IMAGES));
+      const [madeImages, madeFiles] = await Promise.all([
+        Promise.all(pics.slice(0, Math.max(0, roomImg)).map(shrinkImage)),
+        Promise.allSettled(others.slice(0, Math.max(0, roomFile)).map(readAttachedFile)),
+      ]);
+      setImages((now) => [...now, ...madeImages].slice(0, MAX_IMAGES));
+      setFiles((now) => [...now, ...madeFiles.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []))].slice(0, MAX_FILES));
+      for (const r of madeFiles) if (r.status === 'rejected') notes.push(errorMessage(r.reason));
     } catch (e) {
-      setImageError(errorMessage(e));
+      notes.push(errorMessage(e));
     } finally {
       setShrinking(false);
+      setImageError(notes.join(' '));
       input.current?.focus();
     }
   };
@@ -373,17 +396,21 @@ function Composer({ blocks }: { blocks: BlockDto[] }) {
   useEffect(() => {
     const draft = useApp.getState().takeDraft();
     // 입력줄에서 이미지만 넘어왔으면 붙여 두고 할 말을 기다린다. 글이 함께 오면 바로 보낸다.
-    if (draft?.images?.length && !draft.text.trim()) {
-      setImages(draft.images.slice(0, MAX_IMAGES));
+    if ((draft?.images?.length || draft?.files?.length || draft?.links?.length) && !draft.text.trim()) {
+      setImages((draft.images ?? []).slice(0, MAX_IMAGES));
+      setFiles((draft.files ?? []).slice(0, MAX_FILES));
+      setLinks((draft.links ?? []).slice(0, MAX_LINKS));
       input.current?.focus();
-    } else if (draft) void submit(draft.text, draft.data, draft.images);
+    } else if (draft) void submit(draft.text, draft.data, draft.images, draft.files, draft.links);
     else input.current?.focus();
   }, [waiting]);
 
-  const submit = async (value = text, attached?: string, attachedImages?: AttachedImage[]) => {
+  const submit = async (value = text, attached?: string, attachedImages?: AttachedImage[], attachedFiles?: AttachedFile[], attachedLinks?: AttachedLink[]) => {
     const body = value.trim();
     const sending = attachedImages ?? images;
-    if ((!body && sending.length === 0) || busy || shrinking) return;
+    const sendingFiles = attachedFiles ?? files;
+    const sendingLinks = attachedLinks ?? links;
+    if ((!body && sending.length === 0 && sendingFiles.length === 0 && sendingLinks.length === 0) || busy || shrinking) return;
     const current = useApp.getState().selected;
     const chosen = blocks.filter((b) => current.includes(b.id));
     setText('');
@@ -392,8 +419,10 @@ function Composer({ blocks }: { blocks: BlockDto[] }) {
     setShowData(false);
     clearSelected();
     setImages([]);
+    setFiles([]);
+    setLinks([]);
     setImageError('');
-    await send(body, pasted, chosen.map((b) => b.id), chosen.map((b) => b.title), sending);
+    await send(body, pasted, chosen.map((b) => b.id), chosen.map((b) => b.title), sending, sendingFiles, sendingLinks);
   };
 
   return (
@@ -403,12 +432,36 @@ function Composer({ blocks }: { blocks: BlockDto[] }) {
         if (Array.from(e.dataTransfer.types).includes('Files')) e.preventDefault();
       }}
       onDrop={(e) => {
-        const files = imageFilesFrom(e.dataTransfer);
-        if (files.length === 0) return;
+        const dropped = filesFrom(e.dataTransfer);
+        const found = dropped.length === 0 ? googleLinksOnly(droppedText(e.dataTransfer)) : [];
+        if (dropped.length === 0 && found.length === 0) return;
         e.preventDefault();
-        void attach(files);
+        if (found.length > 0) attachLinks(found);
+        else void attach(dropped);
       }}
     >
+      {(files.length > 0 || links.length > 0) && (
+        <div className="mb-2 flex flex-wrap gap-1.5" aria-label="첨부한 파일">
+          {links.map((l, i) => (
+            <span key={l.url} title={l.url} className="flex h-8 max-w-full items-center gap-1 rounded-lg border bg-card pr-1 pl-2 text-sm">
+              <Icon name="link" size={15} className="shrink-0 text-accent" />
+              <span className="max-w-[16rem] truncate">{l.label} 링크</span>
+              <button type="button" aria-label={`링크 ${i + 1} 빼기`} onClick={() => setLinks((now) => now.filter((x) => x.url !== l.url))} className="flex size-6 items-center justify-center rounded-md text-sub hover:bg-tint hover:text-ink">
+                <Icon name="close" size={14} />
+              </button>
+            </span>
+          ))}
+          {files.map((f, i) => (
+            <span key={f.id} className="flex h-8 max-w-full items-center gap-1 rounded-lg border bg-card pr-1 pl-2 text-sm">
+              <Icon name="clip" size={15} className="shrink-0 text-sub" />
+              <span className="max-w-[16rem] truncate">{f.name}</span>
+              <button type="button" aria-label={`파일 ${i + 1} 빼기`} onClick={() => setFiles((now) => now.filter((x) => x.id !== f.id))} className="flex size-6 items-center justify-center rounded-md text-sub hover:bg-tint hover:text-ink">
+                <Icon name="close" size={14} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
       {(images.length > 0 || shrinking) && (
         <div className="mb-2 flex flex-wrap items-center gap-1.5" aria-label="붙인 이미지">
           {images.map((img, i) => (
@@ -466,17 +519,17 @@ function Composer({ blocks }: { blocks: BlockDto[] }) {
       )}
       <div className="flex items-end gap-1.5">
         <IconButton icon="paste" label={showData ? '자료 닫기' : '자료 붙여넣기'} active={showData || !!data} onClick={() => setShowData(!showData)} />
-        <IconButton icon="image" label="이미지 붙이기(붙여넣기·끌어 놓기도 됨)" active={images.length > 0} onClick={() => fileInput.current?.click()} />
+        <IconButton icon="clip" label="파일·이미지 첨부(PDF·한글·워드·엑셀·사진). 구글 문서·시트 링크는 붙여 넣으면 저절로 첨부" active={images.length + files.length + links.length > 0} onClick={() => fileInput.current?.click()} />
         <input
           ref={fileInput}
           type="file"
-          accept="image/*"
+          accept={FILE_ACCEPT}
           multiple
           hidden
           onChange={(e) => {
-            const files = Array.from(e.target.files ?? []);
+            const chosen = Array.from(e.target.files ?? []);
             e.target.value = '';
-            void attach(files);
+            void attach(chosen);
           }}
         />
         <textarea
@@ -484,10 +537,16 @@ function Composer({ blocks }: { blocks: BlockDto[] }) {
           value={text}
           onChange={(e) => setText(e.target.value)}
           onPaste={(e) => {
-            const files = imageFilesFrom(e.clipboardData);
-            if (files.length === 0) return;
+            const pasted = filesFrom(e.clipboardData);
+            if (pasted.length > 0) {
+              e.preventDefault();
+              void attach(pasted);
+              return;
+            }
+            const found = googleLinksOnly(e.clipboardData.getData('text'));
+            if (found.length === 0) return;
             e.preventDefault();
-            void attach(files);
+            attachLinks(found);
           }}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -497,7 +556,7 @@ function Composer({ blocks }: { blocks: BlockDto[] }) {
           }}
           rows={Math.min(4, Math.max(1, text.split('\n').length))}
           maxLength={4000}
-          placeholder={images.length > 0 ? '이미지로 무엇을 할까요? (비워 두면 내용을 정리해 줘요)' : hasMessages ? '이어서 요청하기' : '무엇을 도와드릴까요?  @로 블록 지정'}
+          placeholder={images.length + files.length + links.length > 0 ? '첨부로 무엇을 할까요? (비워 두면 내용을 정리해 줘요)' : hasMessages ? '이어서 요청하기' : '무엇을 도와드릴까요?  @로 블록 지정'}
           aria-label="AI에게 요청"
           className="min-h-11 min-w-0 flex-1 resize-none rounded-[10px] border border-field bg-card px-3 py-2.5 text-sm outline-none focus:border-accent"
         />
@@ -506,7 +565,7 @@ function Composer({ blocks }: { blocks: BlockDto[] }) {
             <Icon name="close" size={18} />
           </button>
         ) : (
-          <button type="button" aria-label="보내기" title="보내기" disabled={(!text.trim() && images.length === 0) || shrinking} onClick={() => void submit()} className="flex size-11 shrink-0 items-center justify-center rounded-full bg-accent text-white disabled:opacity-40">
+          <button type="button" aria-label="보내기" title="보내기" disabled={(!text.trim() && images.length === 0 && files.length === 0 && links.length === 0) || shrinking} onClick={() => void submit()} className="flex size-11 shrink-0 items-center justify-center rounded-full bg-accent text-white disabled:opacity-40">
             <Icon name="send" size={18} />
           </button>
         )}
