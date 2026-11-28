@@ -365,7 +365,7 @@ function CollectStatus({ table }: { table: TableDto }) {
     <span className="flex min-w-0 items-center gap-0.5">
       <span title={table.last_error ?? undefined} className={`truncate text-xs ${table.last_error ? 'text-danger' : 'text-sub'}`}>
         {table.form ? `응답 ${table.row_count}` : '시트'}
-        {table.last_error ? ' · 읽기 오류' : table.last_synced_at ? ` · ${timeLabel(table.last_synced_at)} 갱신` : ''}
+        {table.last_error ? ` · 읽기 오류${table.last_synced_at ? `(${timeLabel(table.last_synced_at)} 자료)` : ''}` : table.last_synced_at ? ` · ${timeLabel(table.last_synced_at)} 기준` : ''}
       </span>
       <IconButton icon="refresh" label={table.form ? '응답 새로 읽기' : '시트 새로 읽기'} size={32} disabled={busy} onClick={() => void reload()} />
     </span>

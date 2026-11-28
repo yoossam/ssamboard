@@ -98,17 +98,17 @@ function QuestionBars({ s, index, big }: { s: QuizQuestionStat; index: number; b
   );
 }
 
-function StatusLine({ stats, big }: { stats: QuizStats; big?: boolean }) {
+/** 몇 시 기준인지(2026-11-28 세 모델 토론 3번) — 쌤보드 퀴즈는 마지막으로 불러온 때 */
+const hm = (t: string | number) => new Date(t).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' });
+
+function StatusLine({ stats, big, asOf }: { stats: QuizStats; big?: boolean; asOf?: number }) {
   const open = stats.quiz.status === 'open';
   return (
     <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 ${big ? 'text-lg' : 'text-sm'}`}>
       <span className={`rounded-full px-2.5 py-0.5 font-bold ${open ? 'bg-tint text-accent' : 'bg-ground text-sub'}`}>{open ? '받는 중' : '마감'}</span>
       <span className="font-bold">응답 {stats.total}명</span>
-      {stats.quiz.source === 'google' && (
-        <span className={`text-sub ${big ? 'text-base' : 'text-xs'}`}>
-          구글 설문 · {stats.quiz.synced_at ? `${new Date(stats.quiz.synced_at).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' })}에 읽음` : '아직 안 읽음'}
-        </span>
-      )}
+      {stats.quiz.source === 'google' && <span className={`text-sub ${big ? 'text-base' : 'text-xs'}`}>구글 설문 · {stats.quiz.synced_at ? `${hm(stats.quiz.synced_at)} 기준` : '아직 안 읽음'}</span>}
+      {stats.quiz.source !== 'google' && asOf ? <span className={`text-sub ${big ? 'text-base' : 'text-xs'}`}>{hm(asOf)} 기준</span> : null}
       {stats.avg_score !== null && !open && (
         <span className="text-sub">
           평균 {stats.avg_score} / {stats.graded}
@@ -121,7 +121,7 @@ function StatusLine({ stats, big }: { stats: QuizStats; big?: boolean }) {
 /** 보드 위 퀴즈 블록 */
 export function QuizBody({ block }: { block: BlockDto }) {
   const id = typeof block.config.quiz_id === 'string' ? block.config.quiz_id : undefined;
-  const { data: stats, error, isLoading } = useQuizStats(id);
+  const { data: stats, error, isLoading, dataUpdatedAt } = useQuizStats(id);
   const open = useApp((s) => s.open);
   if (!id) return <Empty>퀴즈가 없습니다</Empty>;
   if (isLoading) return <Empty>불러오는 중입니다</Empty>;
@@ -130,7 +130,7 @@ export function QuizBody({ block }: { block: BlockDto }) {
   return (
     <div className="flex h-full flex-col">
       <div className="space-y-2 border-b border-rule p-2.5">
-        <StatusLine stats={stats} />
+        <StatusLine stats={stats} asOf={dataUpdatedAt} />
         {live && (
           <button type="button" onClick={() => copy(stats.quiz.url)} className="block w-full truncate rounded-lg bg-ground px-2.5 py-1.5 text-left font-mono text-xs" title="눌러서 복사">
             {stats.quiz.url}
@@ -190,7 +190,7 @@ function Results({ stats, big }: { stats: QuizStats; big?: boolean }) {
 /** 크게 보기 — 교실 TV 용. 위: 학생 주소, 아래: 문항별 막대. 교사 도구(링크 바꾸기·응답 숨기기·지우기)는 접어 둔다. */
 export function QuizScreen({ quizId }: { quizId: string }) {
   const close = useApp((s) => s.close);
-  const { data: stats, error } = useQuizStats(quizId);
+  const { data: stats, error, dataUpdatedAt } = useQuizStats(quizId);
   const [tools, setTools] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
   if (!stats)
@@ -234,7 +234,7 @@ export function QuizScreen({ quizId }: { quizId: string }) {
             </div>
           </div>
         )}
-        <StatusLine stats={stats} big />
+        <StatusLine stats={stats} big asOf={dataUpdatedAt} />
         <Results key={stats.quiz.status} stats={stats} big />
         {!live && (
           <ButtonRow>

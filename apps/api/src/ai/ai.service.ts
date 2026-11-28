@@ -2,7 +2,7 @@ import { TuildersService } from '../tuilders/tuilders.service';
 import { boardKind } from '../common/board-context';
 import { QuizzesService } from '../quizzes/quizzes.service';
 import { Injectable } from '@nestjs/common';
-import { answerLabel, maskDeep, maskPii, type AiStreamEvent, type BoardKind } from '@jarvis/shared';
+import { answerLabel, maskDeep, maskPii, type AiStreamEvent, type BoardKind, followUps } from '@jarvis/shared';
 import type { UserRow } from '../auth/auth.types';
 import { BoardsService } from '../boards/boards.service';
 import { bad, isUuid } from '../common/http';
@@ -117,6 +117,7 @@ export function systemPrompt(_user: Pick<UserRow, 'name' | 'timezone'>, memory =
     '11. 엑셀·한글 파일을 고쳐 달라면 <attached_file editable="xlsx|hwpx" file_id="…"> 의 칸 주소·[p번호]를 보고 edit_file 로 계획에 담습니다. 원본은 그대로이고 승인하면 고친 새 파일을 내려받습니다. 엑셀 합계·평균은 값을 계산해 넣지 말고 수식(formula)으로 넣습니다. 한글은 글자만 바꿀 수 있고(표에 줄 더하기·그림은 안 됨) 양식의 빈 칸은 (빈 칸) 문단에 set_text 로 채웁니다.',
     '12. 수업 보드(맨 끝 안내에 지금 보드가 나옵니다)에서 퀴즈·문제를 내 달라면 create_quiz 로 계획에 담습니다. 퀴즈 결과를 정리해 달라면 quiz_results 로 집계를 읽고, 많이 틀린 문항·자주 고른 오답·다시 설명할 점을 짧게 정리합니다. 숫자는 도구가 준 것만 씁니다. 그래프로 보여 달라면 결과를 표로 만들 필요 없이 집계를 말로 정리하고, 막대는 퀴즈 블록에 이미 있다고 알려 줍니다.',
     '13. 수업 자료: 수업에 쓸 링크(캔바·구글 슬라이드·유튜브 등)를 모아 달라면 add_links, 수업 주제에 맞는 앱을 찾아 달라면 tuilders_find_apps 로 추천을 보여 주고 사용자가 고른 것만 add_links 로 담습니다. 바깥 도구에 로그인하거나 비밀번호를 받지 않습니다.',
+    '14. 수합 숫자(설문 응답 수·퀴즈 결과·연결한 시트 줄 수)를 말할 때는 도구가 준 기준 시각(as_of)을 "○시 ○분 기준"으로 함께 말합니다. 읽기 오류(sync_error·last_error)가 있으면 "새로 읽지 못해 이전 자료"라고 먼저 밝힙니다. 기준 시각이 없으면 지어내지 않습니다.',
     '',
     VIEW_GUIDE,
     ...(memory ? ['', memory] : []),
@@ -449,11 +450,11 @@ export class AiService {
       emit({ type: 'open', target });
       return `${target} 화면을 열었습니다.`;
     }
-    if (target === 'table') {
+    if (target === 'table' || target === 'roster') {
       const t = isUuid(input.id) ? await this.tables.get(user.id, input.id) : null;
       if (!t) throw new Error('그런 표가 없습니다. list_tables로 확인하세요.');
       emit({ type: 'open', target, id: t.id });
-      return `표 "${t.name}"을 열었습니다.`;
+      return target === 'roster' ? `표 "${t.name}"의 명단 대조 창을 열었습니다. 명단은 사용자 기기에서만 대조합니다.` : `표 "${t.name}"을 열었습니다.`;
     }
     if (target === 'block' || target === 'share') {
       const b = isUuid(input.id) ? (await this.boards.listBlocks(user.id, undefined, kind)).find((x) => x.id === input.id) : undefined;
@@ -508,8 +509,22 @@ export class AiService {
         const table = await this.tables.get(uid, input.table_id);
         if (!table) throw new Error('그런 표가 없습니다. list_tables로 다시 확인하세요.');
         if (table.llm_excluded) throw new Error('이 표는 "LLM에 보내지 않음"으로 설정돼 있어 내용을 볼 수 없습니다. 사용자에게 그렇게 알려 주세요.');
-        return this.tables.query(uid, table.id, input, user.timezone);
+        // 수합 기준 시각(2026-11-28 세 모델 토론 3번) — 연결한 시트·설문은 마지막으로 읽은 때와 읽기 오류를 함께
+        const result = await this.tables.query(uid, table.id, input, user.timezone);
+        return table.linked || table.form
+          ? { ...result, as_of: table.last_synced_at ?? null, ...(table.last_error ? { last_error: table.last_error } : {}) }
+          : { ...result, as_of: new Date().toISOString() };
       }
+      case 'list_followups':
+        return (await this.commands.list(uid))
+          .map((c) => ({ id: c.id, title: c.steps[0]?.title ?? '변경', when: c.applied_at ?? c.created_at, followups: followUps(c).map(({ kind, text }) => ({ kind, text })) }))
+          .filter((c) => c.followups.length > 0);
+      case 'get_ai_cost':
+        return {
+          ...(await this.llm.costBrief(user)),
+          months: await this.llm.usage(user),
+          note: '추정(토큰 × 가격표, 캐시 포함은 2026-11-28 이후 기록부터). 정확한 청구는 Claude Console·OpenAI 대시보드.',
+        };
       case 'list_menus':
         return (await this.menus.list(uid, undefined, kind)).map((m, index) => ({
           id: m.id,
@@ -518,6 +533,8 @@ export class AiService {
           icon: m.icon,
           description: m.description,
           action: m.action,
+          pinned: !!m.pinned,
+          auto: !!m.auto,
         }));
       case 'tuilders_find_apps': {
         const apps = await this.tuilders.findApps(uid, input ?? {});
@@ -538,6 +555,8 @@ export class AiService {
           title: st.quiz.title,
           status: st.quiz.status,
           ...(syncError ? { sync_error: syncError } : {}),
+          // 기준 시각: 구글 설문은 마지막으로 읽은 때, 쌤보드 퀴즈는 지금(바로 저장되므로)
+          as_of: st.quiz.source === 'google' ? st.quiz.synced_at : new Date().toISOString(),
           responses: st.total,
           graded_questions: st.graded,
           avg_score: st.avg_score,

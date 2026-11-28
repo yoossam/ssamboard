@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { COLUMN_TYPES, COLUMN_TYPE_LABEL, type Column, type ColumnType, type RowDto, type TableDto, type TablePreview } from '@jarvis/shared';
+import { COLUMN_TYPES, COLUMN_TYPE_LABEL, compareRoster, parseRoster, type Column, type RowPage, type ColumnType, type RowDto, type TableDto, type TablePreview } from '@jarvis/shared';
 import { PreviewEditor, type TableEdit } from '../ai/AiWindow';
 import { Icon } from '../components/Icon';
 import { Button, ButtonRow, Empty, Field, IconButton, inputClass, Notice, rowInput, Sheet, Tabs, Tag, Toggle, useSize } from '../components/ui';
@@ -52,7 +52,12 @@ export function TablesPanel() {
       ) : (
         <div className="grid gap-2 md:grid-cols-2">
           {data.map((t) => (
-            <button key={t.id} type="button" onClick={() => open({ kind: 'table', tableId: t.id })} className="flex h-16 min-w-0 items-center gap-2.5 rounded-[10px] border px-3 text-left hover:bg-ground">
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => open({ kind: 'table', tableId: t.id })}
+              className="flex h-16 min-w-0 items-center gap-2.5 rounded-[10px] border px-3 text-left hover:bg-ground"
+            >
               <Icon name={t.linked ? 'sheet' : 'table'} className="text-accent" />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm font-bold">{t.name}</span>
@@ -71,7 +76,7 @@ export function TablesPanel() {
 
 // ── 표 상세 ──────────────────────────────────────────────────
 
-type DetailTab = 'rows' | 'columns' | 'settings';
+type DetailTab = 'rows' | 'columns' | 'settings' | 'roster';
 const HEAD = 36;
 const CELL_ROW = 40;
 
@@ -86,7 +91,8 @@ function RowForm({ table, row, onDone }: { table: TableDto; row: RowDto | null; 
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(table.schema.columns.map((c) => [c.id, initial(c)])));
   const [busy, setBusy] = useState(false);
 
-  const payload = () => Object.fromEntries(table.schema.columns.map((c) => [c.id, c.type === 'datetime' && values[c.id] ? (localInputToIso(values[c.id]) ?? values[c.id]) : values[c.id] === '' ? null : values[c.id]]));
+  const payload = () =>
+    Object.fromEntries(table.schema.columns.map((c) => [c.id, c.type === 'datetime' && values[c.id] ? (localInputToIso(values[c.id]) ?? values[c.id]) : values[c.id] === '' ? null : values[c.id]]));
   const run = async (action: 'save' | 'delete') => {
     setBusy(true);
     try {
@@ -180,7 +186,14 @@ function RowsTab({ table, startNew }: { table: TableDto; startNew?: boolean }) {
           <Empty>행이 없습니다</Empty>
         ) : (
           (data?.rows ?? []).slice(0, per).map((r) => (
-            <button key={r.id} type="button" disabled={table.linked} onClick={() => setEditing(r)} className="grid h-10 w-full items-center border-b border-rule text-left text-sm enabled:hover:bg-ground disabled:cursor-default" style={template}>
+            <button
+              key={r.id}
+              type="button"
+              disabled={table.linked}
+              onClick={() => setEditing(r)}
+              className="grid h-10 w-full items-center border-b border-rule text-left text-sm enabled:hover:bg-ground disabled:cursor-default"
+              style={template}
+            >
               {cols.map((c) => {
                 const failed = r.raw?.[c.id];
                 return (
@@ -268,7 +281,12 @@ function ColumnsTab({ table }: { table: TableDto }) {
               onBlur={() => rename(c)}
               onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
             />
-            <select aria-label="컬럼 타입" className={`${rowInput} w-[104px] shrink-0`} value={c.type} onChange={(e) => patch({ op: 'retype', col_id: c.id, type: e.target.value }, '타입을 변경했습니다')}>
+            <select
+              aria-label="컬럼 타입"
+              className={`${rowInput} w-[104px] shrink-0`}
+              value={c.type}
+              onChange={(e) => patch({ op: 'retype', col_id: c.id, type: e.target.value }, '타입을 변경했습니다')}
+            >
               {COLUMN_TYPES.map((t) => (
                 <option key={t} value={t}>
                   {COLUMN_TYPE_LABEL[t]}
@@ -276,7 +294,11 @@ function ColumnsTab({ table }: { table: TableDto }) {
               ))}
             </select>
             {confirm === c.id ? (
-              <button type="button" onClick={() => patch({ op: 'delete', col_id: c.id }, '컬럼을 삭제했습니다')} className="h-10 shrink-0 rounded-[10px] bg-danger px-2 text-xs font-bold whitespace-nowrap text-white">
+              <button
+                type="button"
+                onClick={() => patch({ op: 'delete', col_id: c.id }, '컬럼을 삭제했습니다')}
+                className="h-10 shrink-0 rounded-[10px] bg-danger px-2 text-xs font-bold whitespace-nowrap text-white"
+              >
                 삭제 확인
               </button>
             ) : (
@@ -348,11 +370,21 @@ function TableSettingsTab({ table }: { table: TableDto }) {
             <input className={inputClass} value={name} maxLength={80} onChange={(e) => setName(e.target.value)} />
           </Field>
         </div>
-        <IconButton icon="save" label="이름 저장" active disabled={!name.trim() || name.trim() === table.name} onClick={() => act(() => api.patch(`/tables/${table.id}`, { name: name.trim() }), '이름을 변경했습니다')} />
+        <IconButton
+          icon="save"
+          label="이름 저장"
+          active
+          disabled={!name.trim() || name.trim() === table.name}
+          onClick={() => act(() => api.patch(`/tables/${table.id}`, { name: name.trim() }), '이름을 변경했습니다')}
+        />
       </div>
 
       <div className="rounded-[10px] border px-3">
-        <Toggle label="LLM에 보내지 않음" on={table.llm_excluded} onChange={(on) => act(() => api.patch(`/tables/${table.id}`, { llm_excluded: on }), on ? 'AI가 이 표의 내용을 볼 수 없습니다' : 'AI가 이 표를 조회할 수 있습니다')} />
+        <Toggle
+          label="LLM에 보내지 않음"
+          on={table.llm_excluded}
+          onChange={(on) => act(() => api.patch(`/tables/${table.id}`, { llm_excluded: on }), on ? 'AI가 이 표의 내용을 볼 수 없습니다' : 'AI가 이 표를 조회할 수 있습니다')}
+        />
       </div>
       <p className="-mt-2 text-xs text-sub">켜면 AI에는 표 이름만 알려 주고, 컬럼과 행은 보내지 않습니다.</p>
 
@@ -448,11 +480,111 @@ function TableSettingsTab({ table }: { table: TableDto }) {
   );
 }
 
+/**
+ * 명단 대조(2026-11-28 세 모델 토론 4번): 명단을 붙여 넣고 이름 칸을 고르면 미제출·중복·명단에 없는 응답을 보여 준다.
+ * 명단은 이 기기(localStorage)에만 두고 서버·AI 로 보내지 않는다. 비교도 화면에서 한다(@jarvis/shared roster.ts).
+ */
+const rosterKey = (id: string) => `ssb-roster:${id}`;
+function RosterTab({ table }: { table: TableDto }) {
+  const toast = useApp((s) => s.toast);
+  const cols = table.schema.columns;
+  const guess = cols.find((c) => /이름|성명|name|학생|별명/i.test(c.name)) ?? cols.find((c) => c.type === 'text') ?? cols[0];
+  const saved = (() => {
+    try {
+      return JSON.parse(localStorage.getItem(rosterKey(table.id)) ?? 'null') as { text: string; col: string } | null;
+    } catch {
+      return null;
+    }
+  })();
+  const [text, setText] = useState(saved?.text ?? '');
+  const [col, setCol] = useState(saved?.col && cols.some((c) => c.id === saved.col) ? saved.col : (guess?.id ?? ''));
+  const [values, setValues] = useState<(string | null)[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const roster = parseRoster(text);
+
+  const run = async () => {
+    if (roster.length === 0) return toast('명단을 먼저 붙여 넣으세요', 'error');
+    setBusy(true);
+    try {
+      const out: (string | null)[] = [];
+      for (let page = 1; page <= 10; page++) {
+        const r = await api.get<RowPage>(`/tables/${table.id}/rows?page=${page}&size=200`);
+        out.push(...r.rows.map((row) => (row.values[col] === null || row.values[col] === undefined ? null : String(row.values[col]))));
+        if (out.length >= r.total || r.rows.length === 0) break;
+      }
+      setValues(out);
+      try {
+        localStorage.setItem(rosterKey(table.id), JSON.stringify({ text, col }));
+      } catch {
+        /* 저장 못 해도 대조는 된다 */
+      }
+    } catch (e) {
+      toast(errorMessage(e), 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const result = values ? compareRoster(roster, values) : null;
+  return (
+    <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 pt-1" data-roster>
+      <p className="text-sm text-sub">
+        명단을 붙여 넣고 [대조]를 누르면 안 낸 사람을 찾아요. 명단은 <b>이 기기에만</b> 저장되고 서버·AI 로 보내지 않아요.
+        {table.last_synced_at ? ` 응답은 ${shortWhen(table.last_synced_at)} 기준이에요.` : ''}
+      </p>
+      <div className="grid gap-3 md:grid-cols-[1fr_14rem]">
+        <Field label={`명단 (${roster.length}명)`} hint="한 줄에 한 명, 또는 쉼표로. 번호는 있어도 돼요(예: 12 김민수).">
+          <textarea value={text} onChange={(e) => setText(e.target.value)} rows={6} className={`${inputClass} h-auto py-2`} placeholder={'김민수\n이서연\n박지훈'} />
+        </Field>
+        <div className="space-y-2">
+          <Field label="응답의 이름 칸">
+            <select value={col} onChange={(e) => setCol(e.target.value)} className={inputClass}>
+              {cols.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Button icon="check" tone="primary" disabled={busy || !col} onClick={() => void run()}>
+            {busy ? '대조 중…' : '대조'}
+          </Button>
+        </div>
+      </div>
+      {result && (
+        <div className="space-y-2" data-roster-result>
+          <p className="text-base font-bold">
+            {roster.length}명 중 낸 사람 {result.submitted.length}명 · <span className={result.missing.length ? 'text-danger' : ''}>안 낸 사람 {result.missing.length}명</span>
+          </p>
+          {result.missing.length > 0 && (
+            <div className="rounded-lg border border-danger/40 p-2.5">
+              <p className="text-xs font-bold text-danger">안 낸 사람</p>
+              <p className="mt-1 text-sm leading-relaxed">{result.missing.join(', ')}</p>
+              <Button
+                icon="paste"
+                onClick={() =>
+                  void navigator.clipboard
+                    .writeText(result.missing.join(', '))
+                    .then(() => toast('안 낸 사람 이름을 복사했어요'))
+                    .catch(() => window.prompt('복사하세요', result.missing.join(', ')))
+                }
+              >
+                이름 복사
+              </Button>
+            </div>
+          )}
+          {result.duplicates.length > 0 && <Notice tone="info">두 번 이상 낸 사람: {result.duplicates.map((d) => `${d.name}(${d.count})`).join(', ')}</Notice>}
+          {result.unmatched.length > 0 && <Notice tone="info">명단에 없는 응답(오타·별명일 수 있어요, 직접 확인): {result.unmatched.join(', ')}</Notice>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** addRow: 메뉴의 '표에 한 줄 넣기'로 열면 바로 새 줄 칸 */
-export function TablePanel({ tableId, addRow }: { tableId: string; addRow?: boolean }) {
+export function TablePanel({ tableId, addRow, startTab }: { tableId: string; addRow?: boolean; startTab?: DetailTab }) {
   const close = useApp((s) => s.close);
   const { table, isLoading } = useTable(tableId);
-  const [tab, setTab] = useState<DetailTab>('rows');
+  const [tab, setTab] = useState<DetailTab>(startTab ?? 'rows');
   if (!table) {
     if (isLoading) return null;
     return (
@@ -470,10 +602,12 @@ export function TablePanel({ tableId, addRow }: { tableId: string; addRow?: bool
           tabs={[
             { id: 'rows', label: `행 ${count(table.row_count)}`, icon: 'table' },
             { id: 'columns', label: `컬럼 ${table.schema.columns.length}`, icon: 'edit' },
+            { id: 'roster', label: '명단 대조', icon: 'check' },
             { id: 'settings', label: '설정', icon: 'settings' },
           ]}
         />
       </div>
+      {tab === 'roster' && <RosterTab table={table} />}
       {tab === 'rows' && <RowsTab table={table} startNew={addRow} />}
       {tab === 'columns' && <ColumnsTab table={table} />}
       {tab === 'settings' && <TableSettingsTab table={table} />}
@@ -551,7 +685,11 @@ export function UploadPanel() {
         const r = await api.post<{ added: number; unmatched: string[] }>(`/tables/${target}/append`, { upload_id: uploadId });
         toast(r.unmatched.length > 0 ? `${count(r.added)}행을 더했습니다 · 맞는 컬럼이 없어 뺀 열: ${r.unmatched.join(', ')}` : `${count(r.added)}행을 더했습니다`);
       } else {
-        const r = await api.post<{ table: TableDto; failures: Record<string, number> }>('/tables', { name: draft.edit.name, upload_id: uploadId, columns: draft.edit.columns.map((c, i) => ({ ...c, source: i })) });
+        const r = await api.post<{ table: TableDto; failures: Record<string, number> }>('/tables', {
+          name: draft.edit.name,
+          upload_id: uploadId,
+          columns: draft.edit.columns.map((c, i) => ({ ...c, source: i })),
+        });
         if (place) await placeOnBoard(r.table);
         const failed = Object.values(r.failures).reduce((a, b) => a + b, 0);
         toast(failed > 0 ? `표를 만들었습니다 · 변환하지 못한 칸 ${count(failed)}개는 원문을 남겼습니다` : '표를 만들었습니다');

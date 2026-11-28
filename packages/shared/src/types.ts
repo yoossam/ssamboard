@@ -283,14 +283,14 @@ export interface CommandDto {
   steps: PlanStepView[];
   skipped?: string[];
   /** 승인해서 만든 파일(AI 가 고친 엑셀·한글) — 내려받기. expires_at 이 지나면(하루) 지워진다 */
-  files?: { id: string; name: string; expires_at?: string | null; gone?: boolean }[];
+  files?: { id: string; name: string; expires_at?: string | null; gone?: boolean; /** 한 번이라도 받았나(2026-11-28) */ downloaded?: boolean }[];
   /** 처리 결과함(2026-11-28 세 모델 UX 토론 A·J) */
   created_at?: string;
   applied_at?: string | null;
   /** 바뀐 곳 — 화면이 이 항목을 보여 주는 블록을 찾아 강조한다 */
   touched?: { entity: string; id: string }[];
   /** 이 처리로 만든 공유 링크 */
-  shares?: { id: string; title: string; url: string; revoked: boolean }[];
+  shares?: { id: string; title: string; url: string; revoked: boolean; /** 만든 때 사본(드라이브 트랙 구글 문서) — 보드를 고쳐도 바뀌지 않는다 */ snapshot?: boolean }[];
   /** 지금 되돌릴 수 있는지(가장 최근에 적용한 것만) */
   undoable?: boolean;
 }
@@ -330,7 +330,7 @@ export interface SettingsDto {
   api_keys: { provider: string; last4: string }[];
   /** 이번 달(사용자 시간대)의 예상 비용 */
   month_cost: number;
-  usage: { month: string; cost_usd: number; input_tokens: number; output_tokens: number }[];
+  usage: { month: string; cost_usd: number; input_tokens: number; output_tokens: number; cache_tokens: number; runs: number }[];
   /** 처음 접속 안내(AI 열쇠 → 고치는 법 → 메뉴 추천)를 마쳤거나 건너뛰었는지 */
   onboarded: boolean;
 }

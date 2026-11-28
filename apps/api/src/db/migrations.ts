@@ -461,4 +461,22 @@ alter table menu_items add column auto boolean not null default false;
 alter table boards add column menu_arranged_at timestamptz;
 `,
   },
+  {
+    // AI 비용 추정 정확도(2026-11-28 세 모델 토론 2번): 캐시 읽기·저장 토큰을 따로 기록한다(이전 기록은 0 — 그때는 세지 않았다).
+    name: '014_llm_cache_tokens',
+    sql: /* sql */ `
+alter table llm_runs add column cache_read_tokens int not null default 0;
+alter table llm_runs add column cache_write_tokens int not null default 0;
+`,
+  },
+  {
+    // 완료 뒤 남은 일(2026-11-28 세 모델 토론 1번): 고친 파일을 받았는지 — 처리 결과에 '아직 안 받음'을 보이려고.
+    name: '015_upload_downloaded',
+    sql: /* sql */ `alter table uploads add column downloaded_at timestamptz;`,
+  },
+  {
+    // 내 메뉴 고정(2026-11-28 세 모델 토론 5번): 고정한 메뉴는 자동 정렬에서 빠져 맨 위에 남고, 위쪽 줄에도 보인다.
+    name: '016_menu_pinned',
+    sql: /* sql */ `alter table menu_items add column pinned boolean not null default false;`,
+  },
 ];

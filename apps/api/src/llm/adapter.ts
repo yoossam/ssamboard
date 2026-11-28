@@ -16,8 +16,13 @@ export interface LlmMessage {
 }
 
 export interface LlmUsage {
+  /** 캐시를 거치지 않은 입력 토큰(OpenAI 는 전체 입력에서 캐시 읽기를 뺀 값으로 맞춘다) */
   input_tokens: number;
   output_tokens: number;
+  /** 캐시에서 읽은 입력(싸다) — 2026-11-28 비용 추정 정확도 */
+  cache_read_tokens?: number;
+  /** 캐시에 저장한 입력(Claude 5분 캐시, 조금 비싸다) */
+  cache_write_tokens?: number;
 }
 
 export interface LlmToolCall {

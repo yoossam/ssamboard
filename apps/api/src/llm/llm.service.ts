@@ -53,6 +53,12 @@ export class LlmService {
     return row?.cost ?? 0;
   }
 
+  /** AI 창 옆 비용 칩: 이번 달 추정액·한도·마지막 요청 추정액(유료 호출 없이 기록만 본다) */
+  async costBrief(user: Pick<UserRow, 'id' | 'timezone' | 'monthly_budget'>): Promise<{ month_cost: number; budget: number; last_cost: number | null; last_at: string | null }> {
+    const last = await this.db.one<{ cost: number; at: Date }>('select cost_usd::float8 as cost, created_at as at from llm_runs where user_id = $1 order by created_at desc limit 1', [user.id]);
+    return { month_cost: await this.monthCost(user), budget: Number(user.monthly_budget), last_cost: last ? Number(last.cost) : null, last_at: last ? new Date(last.at).toISOString() : null };
+  }
+
   /** 100%에서 AI 호출을 멈춘다. 서버가 강제한다(5장 비용). */
   async assertBudget(user: UserRow): Promise<void> {
     const budget = Number(user.monthly_budget);
@@ -63,15 +69,10 @@ export class LlmService {
 
   /** 호출마다 토큰과 예상 비용을 기록하고, 80%를 넘으면 알린다(NTF-1). */
   async record(user: UserRow, purpose: 'chat' | 'extract' | 'schedule', model: string, usage: LlmUsage): Promise<void> {
-    await this.db.query('insert into llm_runs(user_id, provider, model, purpose, input_tokens, output_tokens, cost_usd) values ($1, $2, $3, $4, $5, $6, $7)', [
-      user.id,
-      user.llm_provider,
-      model,
-      purpose,
-      usage.input_tokens,
-      usage.output_tokens,
-      costUsd(model, usage),
-    ]);
+    await this.db.query(
+      'insert into llm_runs(user_id, provider, model, purpose, input_tokens, output_tokens, cost_usd, cache_read_tokens, cache_write_tokens) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
+      [user.id, user.llm_provider, model, purpose, usage.input_tokens, usage.output_tokens, costUsd(model, usage), usage.cache_read_tokens ?? 0, usage.cache_write_tokens ?? 0],
+    );
     const budget = Number(user.monthly_budget);
     const spent = await this.monthCost(user);
     if (budget > 0 && spent >= budget * 0.8) {
@@ -107,10 +108,11 @@ export class LlmService {
   }
 
   /** 월별 토큰 사용량과 예상 비용(LLM-9). 최근 6개월. */
-  usage(user: Pick<UserRow, 'id' | 'timezone'>): Promise<{ month: string; cost_usd: number; input_tokens: number; output_tokens: number }[]> {
+  usage(user: Pick<UserRow, 'id' | 'timezone'>): Promise<{ month: string; cost_usd: number; input_tokens: number; output_tokens: number; cache_tokens: number; runs: number }[]> {
     return this.db.query(
       `select to_char(date_trunc('month', created_at at time zone $2::text), 'YYYY-MM') as month,
-              sum(cost_usd)::float8 as cost_usd, sum(input_tokens)::int as input_tokens, sum(output_tokens)::int as output_tokens
+              sum(cost_usd)::float8 as cost_usd, sum(input_tokens)::int as input_tokens, sum(output_tokens)::int as output_tokens,
+              sum(cache_read_tokens + cache_write_tokens)::int as cache_tokens, count(*)::int as runs
          from llm_runs where user_id = $1 and created_at >= now() - interval '6 months'
         group by 1 order by 1 desc`,
       [user.id, user.timezone],

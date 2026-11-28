@@ -44,6 +44,7 @@ export const keys = {
   trash: ['trash'] as const,
   menus: ['menus'] as const,
   commands: ['commands'] as const,
+  cost: ['cost'] as const,
 };
 
 /** 바뀐 것을 다시 읽는다. 이름을 주지 않으면 전부. */
@@ -84,6 +85,8 @@ export const useMenus = () => {
   const kind = useApp((s) => s.boardKind);
   return useQuery({ queryKey: [...keys.menus, kind], queryFn: () => api.get<MenuItemDto[]>('/menus') });
 };
+/** AI 비용 칩(이번 달 추정액·한도·마지막 요청) */
+export const useCost = () => useQuery({ queryKey: keys.cost, queryFn: () => api.get<{ month_cost: number; budget: number; last_cost: number | null; last_at: string | null }>('/settings/cost') });
 /** 내 메뉴 자동 정리 상태 — refresh('menus') 로 함께 새로 읽힌다 */
 export const useMenuInfo = () => {
   const kind = useApp((s) => s.boardKind);

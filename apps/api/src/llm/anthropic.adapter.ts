@@ -50,6 +50,8 @@ export class StreamAccumulator {
       case 'message_start':
         this.usage.input_tokens = event.message?.usage?.input_tokens ?? 0;
         this.usage.output_tokens = event.message?.usage?.output_tokens ?? 0;
+        this.usage.cache_read_tokens = event.message?.usage?.cache_read_input_tokens ?? 0;
+        this.usage.cache_write_tokens = event.message?.usage?.cache_creation_input_tokens ?? 0;
         break;
       case 'content_block_start':
         this.blocks[event.index] = { ...event.content_block };
@@ -88,6 +90,8 @@ export class StreamAccumulator {
         // usage의 토큰 수는 누적값이다.
         if (typeof event.usage?.output_tokens === 'number') this.usage.output_tokens = event.usage.output_tokens;
         if (typeof event.usage?.input_tokens === 'number') this.usage.input_tokens = event.usage.input_tokens;
+        if (typeof event.usage?.cache_read_input_tokens === 'number') this.usage.cache_read_tokens = event.usage.cache_read_input_tokens;
+        if (typeof event.usage?.cache_creation_input_tokens === 'number') this.usage.cache_write_tokens = event.usage.cache_creation_input_tokens;
         break;
       case 'error':
         throw new LlmError(friendly(event.error?.type, event.error?.message), 502);
@@ -136,7 +140,12 @@ export class AnthropicAdapter implements LlmAdapter {
     try {
       res = await fetch(`${config.anthropicBaseUrl}/v1/messages`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': API_VERSION, ...(config.anthropicBrowserAccess ? { 'anthropic-dangerous-direct-browser-access': 'true' } : {}) },
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': API_VERSION,
+          ...(config.anthropicBrowserAccess ? { 'anthropic-dangerous-direct-browser-access': 'true' } : {}),
+        },
         body: JSON.stringify(body),
         signal,
       });
@@ -185,7 +194,15 @@ export class AnthropicAdapter implements LlmAdapter {
     const text = (body?.content ?? []).find((b: any) => b.type === 'text')?.text;
     if (typeof text !== 'string') throw new LlmError('LLM이 정해진 형식으로 답하지 않았습니다.');
     try {
-      return { data: JSON.parse(text) as T, usage: { input_tokens: body.usage?.input_tokens ?? 0, output_tokens: body.usage?.output_tokens ?? 0 } };
+      return {
+        data: JSON.parse(text) as T,
+        usage: {
+          input_tokens: body.usage?.input_tokens ?? 0,
+          output_tokens: body.usage?.output_tokens ?? 0,
+          cache_read_tokens: body.usage?.cache_read_input_tokens ?? 0,
+          cache_write_tokens: body.usage?.cache_creation_input_tokens ?? 0,
+        },
+      };
     } catch {
       throw new LlmError('LLM의 답을 읽지 못했습니다.');
     }

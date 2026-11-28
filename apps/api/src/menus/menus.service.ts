@@ -235,7 +235,10 @@ export class MenusService {
 
   /** 지금 보드(업무·수업)의 메뉴 — 보드마다 따로(2026-11-28) */
   list(userId: string, q: Queryable = this.db, kind: BoardKind = boardKind()): Promise<MenuItemDto[]> {
-    return q.query<MenuItemDto>('select id, position, label, icon, description, action, auto from menu_items where user_id = $1 and board_kind = $2 order by position, created_at', [userId, kind]);
+    return q.query<MenuItemDto>('select id, position, label, icon, description, action, auto, pinned from menu_items where user_id = $1 and board_kind = $2 order by position, created_at', [
+      userId,
+      kind,
+    ]);
   }
 
   /** 사용자의 AI 열쇠로 추천받는다. 저장하지 않는다. */
@@ -343,11 +346,14 @@ export class MenusService {
     const label = body?.label === undefined ? null : clip(body.label, MENU_LABEL_MAX) || bad('메뉴 이름이 비었습니다.');
     const icon = body?.icon === undefined ? null : (MENU_ICONS as readonly string[]).includes(String(body.icon)) ? String(body.icon) : bad('쓸 수 없는 아이콘입니다.');
     const description = body?.description === undefined ? null : clip(body.description, 120);
-    const r = await this.db.query(
-      'update menu_items set label = coalesce($3, label), icon = coalesce($4, icon), description = coalesce($5, description), updated_at = now() where id = $1 and user_id = $2 returning id',
-      [id, userId, label, icon, description],
+    const pinned = body?.pinned === undefined ? null : body.pinned === true;
+    const r = await this.db.query<{ board_kind: BoardKind }>(
+      'update menu_items set label = coalesce($3, label), icon = coalesce($4, icon), description = coalesce($5, description), pinned = coalesce($6, pinned), updated_at = now() where id = $1 and user_id = $2 returning board_kind',
+      [id, userId, label, icon, description, pinned],
     );
     if (r.length === 0) notFound('메뉴');
+    // 고정을 바꾸면 바로 자리를 다시 잡는다(고정 = 맨 위)
+    if (pinned !== null) await this.arrange(userId, boardKindOf(r[0].board_kind));
   }
 
   async remove(userId: string, id: string): Promise<void> {
@@ -423,7 +429,7 @@ export class MenusService {
         .slice(0, 3);
       for (const c of candidates) {
         if (menus.length >= MENU_MAX) {
-          const autos = menus.filter((m) => m.auto).sort((a, b) => this.menuScore(a, scores) - this.menuScore(b, scores));
+          const autos = menus.filter((m) => m.auto && !m.pinned).sort((a, b) => this.menuScore(a, scores) - this.menuScore(b, scores));
           const weakest = autos[0];
           if (!weakest || this.menuScore(weakest, scores) * 1.5 >= c.score) continue;
           await q.query('delete from menu_items where id = $1 and user_id = $2', [weakest.id, userId]);
@@ -435,7 +441,8 @@ export class MenusService {
         );
         menus.push(made!);
       }
-      const order = menus.map((m, i) => ({ id: m.id, s: this.menuScore(m, scores), i })).sort((a, b) => b.s - a.s || a.i - b.i);
+      // 고정한 메뉴는 원래 순서대로 맨 위, 나머지만 점수 순
+      const order = menus.map((m, i) => ({ id: m.id, p: m.pinned ? 1 : 0, s: m.pinned ? 0 : this.menuScore(m, scores), i })).sort((a, b) => b.p - a.p || b.s - a.s || a.i - b.i);
       for (const [pos, m] of order.entries()) await q.query('update menu_items set position = $3 where id = $1 and user_id = $2 and position <> $3', [m.id, userId, pos]);
       await q.query('update boards set menu_arranged_at = now() where user_id = $1 and kind = $2', [userId, kind]);
       // 오래된 기록은 정리(점수는 60일까지만 본다)

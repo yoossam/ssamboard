@@ -1,3 +1,4 @@
+import { NOTICE_PROMPT } from '../lib/prompts';
 import { QuickAddButton } from './quickadd';
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import GridLayout from 'react-grid-layout';
@@ -20,11 +21,12 @@ import {
   DEFAULT_BLOCK_SIZE,
   paintOf,
   titlePaint,
+  followUps,
 } from '@jarvis/shared';
 import { BLOCK_ICON, Icon } from '../components/Icon';
 import { Button, CountBadge, Empty, IconButton, useIsPhone, useSize } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
-import { keys, queryClient, refresh, useBoard, useCommands, useEvents, useNotifications, useSettings, useTasks, boardKey } from '../lib/data';
+import { keys, queryClient, refresh, useBoard, useCommands, useEvents, useNotifications, useSettings, useTasks, boardKey, useCost } from '../lib/data';
 import { dateLabel, dayKey } from '../lib/format';
 import { FILE_ACCEPT, filesFrom, googleLinksOnly, MAX_FILES, MAX_IMAGES, readAttachedFile, shrinkImage, splitFiles } from '../lib/images';
 import { useApp } from '../lib/store';
@@ -168,6 +170,32 @@ function BoardSwitch() {
   );
 }
 
+/**
+ * AI 비용 칩(2026-11-28 세 모델 토론 2번): 입력줄 안에 이번 달 추정액. 한도 80% 넘으면 붉게.
+ * 누르면 설정 → 일반(사용량 표). 금액은 토큰 × 가격표로 계산한 추정이라 '추정'이라고 쓴다.
+ */
+function CostChip() {
+  const { data } = useCost();
+  const open = useApp((s) => s.open);
+  if (!data) return null;
+  const ratio = data.budget > 0 ? data.month_cost / data.budget : 0;
+  const money = (v: number) => `$${v < 0.01 && v > 0 ? '<0.01' : v.toFixed(2)}`;
+  const tip = `이번 달 AI 비용(추정) ${money(data.month_cost)} / 한도 $${data.budget}${data.last_cost !== null ? ` · 마지막 요청 약 ${money(data.last_cost)}` : ''}\n토큰 수 × 가격표로 계산한 추정이에요. 정확한 청구는 Claude Console·OpenAI 대시보드에서.`;
+  return (
+    <button
+      type="button"
+      data-cost-chip
+      title={tip}
+      aria-label={tip}
+      onClick={() => open({ kind: 'settings', tab: 'general' })}
+      className={`shrink-0 rounded-md px-2 py-1 text-xs font-medium whitespace-nowrap tabular-nums ${ratio >= 0.8 ? 'bg-danger/10 text-danger' : 'bg-tag text-tagink hover:text-accent'}`}
+    >
+      {ratio >= 0.8 ? '⚠ ' : ''}
+      {money(data.month_cost)}
+    </button>
+  );
+}
+
 function TopBar() {
   const open = useApp((s) => s.open);
   const phone = useIsPhone();
@@ -237,17 +265,19 @@ function ResultsButton() {
   const phone = useIsPhone();
   const { data } = useCommands();
   const waiting = data?.filter((c) => c.status === 'proposed').length ?? 0;
+  // 끝낸 일 가운데 남은 일(안 받은 파일 등)이 있는 것 — 승인 대기보다 약하게(2026-11-28 세 모델 토론 1번)
+  const pending = data?.filter((c) => c.status !== 'proposed' && followUps(c).length > 0).length ?? 0;
   return (
     <button
       type="button"
       onClick={() => open({ kind: 'results' })}
-      aria-label={`처리 결과${waiting > 0 ? ` · 승인 대기 ${waiting}건` : ''}`}
+      aria-label={`처리 결과${waiting > 0 ? ` · 승인 대기 ${waiting}건` : ''}${pending > 0 ? ` · 남은 일 ${pending}건` : ''}`}
       title="AI 에게 맡긴 일의 결과(파일·링크·되돌리기)"
       className="flex h-9 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-sm font-medium text-ink hover:bg-tint"
     >
       <Icon name="archive" size={18} className="text-accent" />
       {!phone && '처리 결과'}
-      {waiting > 0 && <CountBadge n={waiting} alert />}
+      {waiting > 0 ? <CountBadge n={waiting} alert /> : pending > 0 && <CountBadge n={pending} />}
     </button>
   );
 }
@@ -653,9 +683,6 @@ function PhoneBoard({ blocks }: { blocks: BlockDto[] }) {
   );
 }
 
-/** 보내자마자 AI 가 시작하는 말 — 가정통신문에서 일정 뽑기 */
-const NOTICE_PROMPT = '첨부한 가정통신문(안내문)에서 날짜가 있는 행사·마감을 찾아 일정과 할 일로 넣어 줘. 날짜·시간이 분명하지 않은 것은 따로 알려 줘.';
-
 /**
  * AI 입력줄 위의 빠른 업무 3개(2026-11-28 UX 토론 C). 빈칸 앞에서 할 말을 고민하지 않게, 필요한 자료부터 받는다.
  * AI 열쇠가 없으면 먼저 열쇠 넣는 곳으로 안내한다(토론 I 의 단서).
@@ -664,6 +691,14 @@ function QuickTasks({ onFiles, onText }: { onFiles: (files: File[], prompt?: str
   const { data: settings } = useSettings();
   const open = useApp((s) => s.open);
   const toast = useApp((s) => s.toast);
+  // 처음 안내에서 고른 첫 업무를 이어 받는다(2026-11-28 세 모델 토론 6번)
+  const firstTask = useApp((s) => s.firstTask);
+  useEffect(() => {
+    if (!firstTask) return;
+    useApp.getState().setFirstTask(null);
+    if (firstTask.files?.length) onFiles(firstTask.files, firstTask.prompt);
+    else if (firstTask.text) onText(firstTask.text);
+  }, [firstTask, onFiles, onText]);
   const notice = useRef<HTMLInputElement>(null);
   const edit = useRef<HTMLInputElement>(null);
   const ready = () => {
@@ -857,6 +892,7 @@ function AiBar() {
             블록 {selected}개 <Icon name="close" size={12} />
           </button>
         )}
+        <CostChip />
         {!phone && <kbd className="shrink-0 rounded-md bg-tag px-2 py-1 font-sans text-xs whitespace-nowrap text-tagink">Ctrl K</kbd>}
         <button type="submit" aria-label="보내기" className="flex size-10 shrink-0 items-center justify-center rounded-full bg-accent text-white hover:brightness-110">
           <Icon name="send" size={18} />

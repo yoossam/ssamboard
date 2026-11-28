@@ -13,3 +13,5 @@ export * from './memory';
 export * from './quiz';
 export * from './links';
 export * from './qr';
+export * from './followups';
+export * from './roster';

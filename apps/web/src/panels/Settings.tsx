@@ -184,7 +184,7 @@ function GeneralTab({ settings }: { settings: SettingsDto }) {
               <span>월</span>
               <span className="text-right">입력 토큰</span>
               <span className="text-right">출력 토큰</span>
-              <span className="text-right">예상 비용</span>
+              <span className="text-right">추정 비용</span>
             </div>
             {settings.usage.slice(0, 6).map((u) => (
               <div key={u.month} className="grid h-8 grid-cols-4 items-center border-b border-rule tabular-nums last:border-b-0">
@@ -194,6 +194,9 @@ function GeneralTab({ settings }: { settings: SettingsDto }) {
                 <span className="text-right">{usd(u.cost_usd)}</span>
               </div>
             ))}
+            <p className="mt-2 leading-relaxed text-sub">
+              추정 비용 = 응답이 알려 준 토큰 수 × 가격표(캐시 읽기·저장 포함, 11월 28일 이후 기록부터). 세금·환율·끊긴 요청은 빠지니, 정확한 청구는 Claude Console(또는 OpenAI 대시보드)에서 보세요.
+            </p>
           </div>
         )}
       </div>

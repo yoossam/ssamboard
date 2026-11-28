@@ -742,7 +742,7 @@ function PanelView({ panel }: { panel: Panel }) {
     case 'tables':
       return <TablesPanel />;
     case 'table':
-      return <TablePanel tableId={panel.tableId} addRow={panel.addRow} />;
+      return <TablePanel key={`${panel.tableId}:${panel.tab ?? ''}`} tableId={panel.tableId} addRow={panel.addRow} startTab={panel.tab} />;
     case 'upload':
       return <UploadPanel />;
     case 'sheet':

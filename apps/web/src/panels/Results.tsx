@@ -4,7 +4,7 @@ import { openCreatedQuiz } from '../board/quiz';
  * AI 가 처리한 일을 최근 14일 동안 모아, 상태(승인 대기·마무리 중·완료·되돌림)와 할 수 있는 동작만 보인다.
  */
 import { useState } from 'react';
-import type { CommandDto } from '@jarvis/shared';
+import { followUps, type CommandDto } from '@jarvis/shared';
 import { downloadFile, StepDetail } from '../ai/AiWindow';
 import { Icon } from '../components/Icon';
 import { Button, Empty, Notice, Sheet, Tag } from '../components/ui';
@@ -34,6 +34,41 @@ async function copy(url: string): Promise<void> {
     // 복사가 막힌 브라우저 — 주소를 보여 주고 직접 복사하게
     window.prompt('이 링크를 복사하세요', url);
   }
+}
+
+const FOLLOW_ICON = { approve: 'check', download: 'download', snapshot: 'link', external: 'sheet', retry: 'sparkle' } as const;
+
+/** 남은 일 줄 — 다시 시키기는 AI 창으로 */
+function FollowUpList({ cmd }: { cmd: CommandDto }) {
+  const openAi = useApp((s) => s.openAi);
+  const close = useApp((s) => s.close);
+  const items = followUps(cmd).filter((f) => f.kind !== 'approve');
+  if (items.length === 0) return null;
+  return (
+    <div data-followups className="mt-2 rounded-lg border border-accent/40 bg-tint px-2.5 py-2">
+      <p className="text-xs font-bold text-accent">남은 일</p>
+      <ul className="mt-1 space-y-1">
+        {items.map((f, i) => (
+          <li key={i} className="flex items-start gap-1.5 text-sm">
+            <Icon name={FOLLOW_ICON[f.kind]} size={14} className="mt-0.5 shrink-0 text-accent" />
+            <span className="min-w-0 flex-1">{f.text}</span>
+            {f.prompt && (
+              <button
+                type="button"
+                className="shrink-0 text-xs font-bold text-accent hover:underline"
+                onClick={() => {
+                  close();
+                  openAi(f.prompt);
+                }}
+              >
+                다시 시키기 →
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 function ResultCard({ cmd }: { cmd: CommandDto }) {
@@ -106,6 +141,8 @@ function ResultCard({ cmd }: { cmd: CommandDto }) {
           </Notice>
         </div>
       )}
+      {/* 완료 뒤 남은 일(2026-11-28 세 모델 토론 1번) — 앱에서 끝난 것과 업무가 끝난 것이 다른 곳 */}
+      <FollowUpList cmd={cmd} />
       {/* 결과물 — 파일·공유 링크 */}
       {cmd.status !== 'proposed' && (cmd.files?.length ?? 0) + (cmd.shares?.length ?? 0) > 0 && (
         <div className="mt-2 space-y-1.5">
@@ -116,8 +153,9 @@ function ResultCard({ cmd }: { cmd: CommandDto }) {
               {f.gone || cmd.status !== 'applied' ? (
                 <span className="shrink-0 text-xs text-sub">{cmd.status !== 'applied' ? '되돌림' : '받을 기간 지남'}</span>
               ) : (
-                <Button icon="download" tone="primary" onClick={() => void downloadFile(f.id)}>
-                  받기{f.expires_at ? ` · ${shortWhen(f.expires_at)}까지` : ''}
+                <Button icon="download" tone={f.downloaded ? undefined : 'primary'} onClick={() => void downloadFile(f.id).then(() => refresh('commands'))}>
+                  {f.downloaded ? '다시 받기' : '받기'}
+                  {f.expires_at ? ` · ${shortWhen(f.expires_at)}까지` : ''}
                 </Button>
               )}
             </div>
@@ -125,7 +163,10 @@ function ResultCard({ cmd }: { cmd: CommandDto }) {
           {cmd.shares?.map((s) => (
             <div key={s.id} className="flex min-h-11 items-center gap-2 rounded-lg bg-ground px-2">
               <Icon name="link" size={18} className="shrink-0 text-sub" />
-              <span className="min-w-0 flex-1 truncate text-sm">{s.title}</span>
+              <span className="min-w-0 flex-1 truncate text-sm">
+                {s.title}
+                {s.snapshot && <span className="ml-1 text-xs text-sub">· 만든 때 사본</span>}
+              </span>
               {s.revoked ? (
                 <span className="shrink-0 text-xs text-sub">링크 꺼짐</span>
               ) : (
@@ -178,16 +219,29 @@ export function ResultsPanel() {
   const { data, isLoading, error } = useCommands();
   const list = data ?? [];
   const waiting = list.filter((c) => c.status === 'proposed').length;
+  const pending = list.filter((c) => c.status !== 'proposed' && followUps(c).length > 0).length;
+  const [onlyPending, setOnlyPending] = useState(false);
+  const shown = onlyPending ? list.filter((c) => followUps(c).length > 0) : list;
   return (
     <Sheet title="처리 결과" icon="archive" onClose={close} tall>
       <div className="space-y-3 p-4">
-        <p className="text-sm text-sub">AI 에게 맡긴 일의 결과를 최근 14일 동안 모았습니다.{waiting > 0 ? ` 승인을 기다리는 것이 ${waiting}건 있습니다.` : ''}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="min-w-0 flex-1 text-sm text-sub">
+            AI 에게 맡긴 일의 결과를 최근 14일 동안 모았습니다.{waiting > 0 ? ` 승인을 기다리는 것이 ${waiting}건 있습니다.` : ''}
+            {pending > 0 ? ` 끝낸 일 가운데 ${pending}건에 남은 일이 있어요.` : ''}
+          </p>
+          {(pending > 0 || waiting > 0) && (
+            <Button icon={onlyPending ? 'close' : 'check'} onClick={() => setOnlyPending((v) => !v)}>
+              {onlyPending ? '전부 보기' : '남은 일만'}
+            </Button>
+          )}
+        </div>
         {error ? (
           <Notice tone="danger">{errorMessage(error)}</Notice>
         ) : list.length === 0 ? (
           <Empty>{isLoading ? '불러오는 중입니다' : '아직 처리한 일이 없습니다. 아래 입력줄에 할 일을 적어 보세요.'}</Empty>
         ) : (
-          list.map((c) => <ResultCard key={c.id} cmd={c} />)
+          shown.map((c) => <ResultCard key={c.id} cmd={c} />)
         )}
         {list.some((c) => c.undoable) && <p className="text-xs leading-relaxed text-sub">{UNDO_SCOPE} 되돌리기는 가장 최근에 처리한 것부터 차례로 됩니다.</p>}
       </div>

@@ -88,6 +88,18 @@ export const READ_TOOLS: LlmTool[] = [
 // 말로 관리(2026-11-28 선생님 "AI 로 쉽게 정리·관리·보기"): 메뉴·공유 링크를 읽고, 화면을 연다.
 READ_TOOLS.push(
   {
+    name: 'list_followups',
+    description:
+      '최근 14일 처리 결과 가운데 사용자가 아직 할 일(승인 대기·안 받은 파일·만든 때 사본인 공유·구글에 남은 설문·하지 못한 것)을 돌려준다. "방금 일에서 내가 더 할 일", "남은 일 있어?"에 쓴다. 받기·다시 공유는 사용자가 처리 결과 창에서 누르도록 안내한다.',
+    input_schema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'get_ai_cost',
+    description:
+      'AI 사용 비용(추정)을 돌려준다: 이번 달 추정액·한도·마지막 요청 추정액, 최근 달별 토큰·요청 수. "AI 얼마 썼어?"에 쓴다. 금액은 쌤보드가 토큰 수 × 가격표로 계산한 추정이고, 정확한 청구는 Claude Console·OpenAI 대시보드가 기준이라고 함께 말한다.',
+    input_schema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
     name: 'list_menus',
     description: '보드 위쪽 바로가기 줄의 "내 메뉴" 목록(id, 순서, 이름, 아이콘, 동작)을 돌려준다. 메뉴를 고치거나 지우기 전에 id 를 확인할 때 쓴다.',
     input_schema: { type: 'object', properties: {}, additionalProperties: false },
@@ -117,8 +129,8 @@ READ_TOOLS.push(
     name: 'open_screen',
     description:
       '사용자 화면에서 창을 바로 연다(바꾸는 것이 없어 승인이 필요 없다). "출석부 열어 줘", "휴지통 보여 줘", "설정 열어 줘"처럼 화면을 열어 달라고 할 때 쓴다. ' +
-      `target: ${MENU_PANELS.join(', ')}(앱 화면), table(표 하나 — id 는 list_tables), block(블록을 크게 — id 는 get_board), share(블록의 공유 링크 창 — id 는 블록 id).`,
-    input_schema: { type: 'object', properties: { target: { type: 'string', enum: [...MENU_PANELS, 'table', 'block', 'share'] }, id: { type: 'string' } }, required: ['target'] },
+      `target: ${MENU_PANELS.join(', ')}(앱 화면), table(표 하나 — id 는 list_tables), roster(표의 명단 대조 창 — 미제출 확인. 명단은 사용자 기기에만 있고 AI 는 볼 수 없으니 "붙여 넣고 대조하세요"라고 안내, id 는 표 id), block(블록을 크게 — id 는 get_board), share(블록의 공유 링크 창 — id 는 블록 id).`,
+    input_schema: { type: 'object', properties: { target: { type: 'string', enum: [...MENU_PANELS, 'table', 'roster', 'block', 'share'] }, id: { type: 'string' } }, required: ['target'] },
   },
 );
 
@@ -361,10 +373,18 @@ export const WRITE_TOOLS: LlmTool[] = [
   },
   {
     name: 'update_menu',
-    description: '내 메뉴의 이름·아이콘·설명을 바꾸거나 순서(index, 0 이 맨 앞)를 옮기는 단계를 계획에 담는다. id 는 list_menus 로 확인한다. 동작을 바꾸려면 지우고 새로 만든다.',
+    description:
+      '내 메뉴의 이름·아이콘·설명을 바꾸거나 순서(index, 0 이 맨 앞)를 옮기거나 고정(pinned: true 면 자동 정렬에서 빠져 맨 위·위쪽 줄에 보임, false 면 풀기)하는 단계를 계획에 담는다. "○○ 메뉴 맨 위에 고정해 줘"는 pinned:true. id 는 list_menus 로 확인한다. 동작을 바꾸려면 지우고 새로 만든다.',
     input_schema: {
       type: 'object',
-      properties: { id: { type: 'string' }, label: { type: 'string' }, icon: { type: 'string', enum: [...MENU_ICONS] }, description: { type: 'string' }, index: { type: 'integer' } },
+      properties: {
+        id: { type: 'string' },
+        label: { type: 'string' },
+        icon: { type: 'string', enum: [...MENU_ICONS] },
+        description: { type: 'string' },
+        index: { type: 'integer' },
+        pinned: { type: 'boolean' },
+      },
       required: ['id'],
     },
   },

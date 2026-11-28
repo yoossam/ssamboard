@@ -11,7 +11,7 @@ export type Panel =
   | { kind: 'settings'; tab?: SettingsTab }
   | { kind: 'notifications' }
   | { kind: 'tables' }
-  | { kind: 'table'; tableId: string; addRow?: boolean }
+  | { kind: 'table'; tableId: string; addRow?: boolean; tab?: 'rows' | 'columns' | 'settings' | 'roster' }
   | { kind: 'upload' }
   | { kind: 'sheet'; connectorId: string }
   | { kind: 'trash' }
@@ -58,6 +58,9 @@ interface AppState {
   selected: string[];
   /** 방금 바뀐 블록 — 잠깐 강조한다(승인 뒤 바뀐 곳 보기, 2026-11-28 UX 토론 J) */
   highlight: string[];
+  /** 처음 안내에서 고른 첫 업무(2026-11-28 세 모델 토론 6번) — AI 입력줄이 받아 바로 시작한다 */
+  firstTask: { text?: string; files?: File[]; prompt?: string } | null;
+  setFirstTask: (task: { text?: string; files?: File[]; prompt?: string } | null) => void;
   toasts: Toast[];
   /** 지금 보는 보드(업무·수업) — 기기마다 기억한다(2026-11-28 두 보드). 서버에는 요청마다 X-Board 로 알린다. */
   boardKind: BoardKind;
@@ -119,6 +122,8 @@ export const useApp = create<AppState>()((set, get) => ({
   editMode: false,
   selected: [],
   highlight: [],
+  firstTask: null,
+  setFirstTask: (firstTask) => set({ firstTask }),
   toasts: [],
   boardKind: savedBoard(),
 

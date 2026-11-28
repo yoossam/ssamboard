@@ -75,6 +75,8 @@ export interface MenuItemDto {
   action: MenuAction;
   /** 자주 쓰는 기능이라 쌤보드가 저절로 넣은 메뉴(2026-11-28) */
   auto?: boolean;
+  /** 고정 — 자동 정렬에서 빠져 맨 위에 남고, 위쪽 줄에도 보인다(2026-11-28) */
+  pinned?: boolean;
   /** 최근 쓴 정도(하루 한 번 정리할 때 매긴 점수, 높을수록 위) */
   score?: number;
 }

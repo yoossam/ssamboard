@@ -47,7 +47,8 @@ export function MenuAutoNote({ compact = false }: { compact?: boolean }) {
           {autos}
         </p>
         <p className="mt-0.5 text-sub">
-          하루 한 번 쓴 만큼 정리해서 자주 쓰는 메뉴는 위로, 안 쓰는 메뉴는 아래로 가요. 자주 쓰는 화면·표는 <b>자동</b> 표시를 달고 저절로 들어와요.
+          하루 한 번 쓴 만큼 정리해서 자주 쓰는 메뉴는 위로, 안 쓰는 메뉴는 아래로 가요. 자주 쓰는 화면·표는 <b>자동</b> 표시를 달고 저절로 들어와요. 📌 를 누르면 맨 위에 고정돼 자리가 바뀌지 않고
+          위쪽 줄에도 보여요.
         </p>
       </div>
     </div>
@@ -127,6 +128,7 @@ export function MenuBlockBody() {
           >
             <Icon name={m.icon} size={16} className="shrink-0 text-accent" />
             <span className="min-w-0 flex-1 truncate">{m.label}</span>
+            {m.pinned && <Icon name="pin" size={12} className="shrink-0 text-accent" />}
             {m.auto && <span className="shrink-0 rounded-full bg-tint px-1.5 text-[11px] text-accent">자동</span>}
             {m.action.type === 'ask_ai' && <Icon name="sparkle" size={12} className="shrink-0 text-sub" />}
           </button>
@@ -160,6 +162,15 @@ export function MenuDrawer() {
     return () => window.removeEventListener('keydown', onKey);
   }, [close]);
   const items = menus ?? [];
+  const togglePin = async (m: MenuItemDto) => {
+    try {
+      await api.patch(`/menus/${m.id}`, { pinned: !m.pinned });
+      await refresh('menus');
+      toast(m.pinned ? '고정을 풀었어요' : '맨 위에 고정했어요 · 위쪽 줄에도 보여요');
+    } catch (e) {
+      toast(errorMessage(e), 'error');
+    }
+  };
   const rearrange = async () => {
     setBusy(true);
     try {
@@ -187,21 +198,32 @@ export function MenuDrawer() {
           {isLoading && <p className="p-2 text-sm text-sub">불러오는 중…</p>}
           {!isLoading && items.length === 0 && <p className="p-2 text-sm text-sub">아직 메뉴가 없어요. 쌤보드를 쓰다 보면 자주 쓰는 기능이 여기 들어와요.</p>}
           {items.map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              title={m.description || m.label}
-              onClick={() => {
-                close();
-                runMenu(m.action, m.id);
-              }}
-              className="flex min-h-12 w-full items-center gap-3 rounded-xl border bg-card px-3 text-left transition hover:border-accent hover:bg-tint active:scale-[0.99]"
-            >
-              <Icon name={m.icon} size={20} className="shrink-0 text-accent" />
-              <span className="min-w-0 flex-1 truncate text-[15px] font-medium">{m.label}</span>
-              {m.auto && <span className="shrink-0 rounded-full bg-tint px-2 py-0.5 text-xs text-accent">자동</span>}
-              {m.action.type === 'ask_ai' && <Icon name="sparkle" size={12} className="shrink-0 text-sub" />}
-            </button>
+            <div key={m.id} className="flex items-center gap-1">
+              <button
+                type="button"
+                title={m.description || m.label}
+                onClick={() => {
+                  close();
+                  runMenu(m.action, m.id);
+                }}
+                className="flex min-h-12 w-full items-center gap-3 rounded-xl border bg-card px-3 text-left transition hover:border-accent hover:bg-tint active:scale-[0.99]"
+              >
+                <Icon name={m.icon} size={20} className="shrink-0 text-accent" />
+                <span className="min-w-0 flex-1 truncate text-[15px] font-medium">{m.label}</span>
+                {m.auto && <span className="shrink-0 rounded-full bg-tint px-2 py-0.5 text-xs text-accent">자동</span>}
+                {m.action.type === 'ask_ai' && <Icon name="sparkle" size={12} className="shrink-0 text-sub" />}
+              </button>
+              <button
+                type="button"
+                aria-pressed={!!m.pinned}
+                aria-label={m.pinned ? `${m.label} 고정 풀기` : `${m.label} 맨 위에 고정`}
+                title={m.pinned ? '고정 풀기(다시 자주 쓰는 순으로)' : '맨 위에 고정 — 자동 정렬에서 빼고 위쪽 줄에도 보여요'}
+                onClick={() => void togglePin(m)}
+                className={`flex size-10 shrink-0 items-center justify-center rounded-xl ${m.pinned ? 'bg-accent text-white' : 'text-sub hover:bg-tint hover:text-accent'}`}
+              >
+                <Icon name="pin" size={16} />
+              </button>
+            </div>
           ))}
         </nav>
         <footer className="grid shrink-0 grid-cols-2 gap-2 border-t border-rule p-3">
@@ -223,8 +245,9 @@ export function MenuBar() {
   const phone = useIsPhone();
   const open = useApp((s) => s.open);
   const onBoard = useMenuOnBoard();
-  const items = menus ?? [];
-  if (onBoard) return phone ? null : <span className="flex-1" />;
+  // 보드에 내 메뉴 블록이 있으면(늘 있다) 위쪽 줄에는 고정한 메뉴만(2026-11-28 세 모델 토론 5번)
+  const items = onBoard ? (menus ?? []).filter((m) => m.pinned) : (menus ?? []);
+  if (onBoard && items.length === 0) return phone ? null : <span className="flex-1" />;
   const chips = (
     <>
       {items.map((m) => (
@@ -239,7 +262,7 @@ export function MenuBar() {
           {m.label}
         </button>
       ))}
-      {items.length === 0 && (
+      {items.length === 0 && !onBoard && (
         <button
           type="button"
           onClick={() => open({ kind: 'settings', tab: 'menu' })}

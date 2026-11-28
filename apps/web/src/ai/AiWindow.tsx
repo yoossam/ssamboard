@@ -49,15 +49,17 @@ function openScreen(target: string, id?: string): void {
   const panel: Panel | null =
     target === 'table' && id
       ? { kind: 'table', tableId: id }
-      : target === 'block' && id
-        ? { kind: 'block', blockId: id }
-        : target === 'share' && id
-          ? { kind: 'share', blockId: id }
-          : (MENU_PANELS as readonly string[]).includes(target)
-            ? target === 'settings'
-              ? { kind: 'settings' }
-              : ({ kind: target } as Panel)
-            : null;
+      : target === 'roster' && id
+        ? { kind: 'table', tableId: id, tab: 'roster' }
+        : target === 'block' && id
+          ? { kind: 'block', blockId: id }
+          : target === 'share' && id
+            ? { kind: 'share', blockId: id }
+            : (MENU_PANELS as readonly string[]).includes(target)
+              ? target === 'settings'
+                ? { kind: 'settings' }
+                : ({ kind: target } as Panel)
+              : null;
   if (!panel) return;
   if (app.aiLayout === 'modal') app.closeAi();
   app.open(panel);
@@ -293,8 +295,8 @@ export const useAi = create<AiState>()((set, get) => ({
     } finally {
       patch(replyId, { streaming: false });
       set({ busy: false, abort: null });
-      // 비용 한도 알림 같은 것이 새로 생겼을 수 있다.
-      void refresh('notifications');
+      // 비용 한도 알림 같은 것이 새로 생겼을 수 있다. 비용 칩도 새로.
+      void refresh('notifications', 'cost');
     }
   },
 }));

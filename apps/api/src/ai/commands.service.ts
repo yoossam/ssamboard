@@ -661,6 +661,7 @@ export class CommandsService {
         }
         if (typeof input.description === 'string') notes.push(`설명 → ${(patch.description = text(input.description, 120))}`);
         if (Number.isInteger(input.index)) notes.push(`${(patch.index = Math.max(0, input.index as number)) + 1}번째로`);
+        if (typeof input.pinned === 'boolean') notes.push((patch.pinned = input.pinned) ? '맨 위에 고정' : '고정 풀기');
         if (notes.length === 0) return fail('바꿀 내용이 없습니다.');
         return {
           ok: true,
@@ -831,7 +832,10 @@ export class CommandsService {
         )
       : [];
     const files = fileIds.length
-      ? await this.db.query<{ id: string; expires_at: string }>("select id, (created_at + interval '1 day') as expires_at from uploads where user_id = $1 and id = any($2::uuid[])", [userId, fileIds])
+      ? await this.db.query<{ id: string; expires_at: string; downloaded: boolean }>(
+          "select id, (created_at + interval '1 day') as expires_at, downloaded_at is not null as downloaded from uploads where user_id = $1 and id = any($2::uuid[])",
+          [userId, fileIds],
+        )
       : [];
     const latest = await this.db.one<{ id: string }>("select id from ai_commands where user_id = $1 and status in ('applied', 'applying') order by applied_at desc, id desc limit 1", [userId]);
     for (const r of rows) {
@@ -844,10 +848,13 @@ export class CommandsService {
         created_at: r.created_at,
         applied_at: r.applied_at ?? null,
         touched,
-        shares: shares.filter((s) => mine.has(s.id)).map((s) => ({ id: s.id, title: s.title, url: s.external_url ?? `${config.publicUrl}/s/${s.token}`, revoked: s.revoked_at !== null })),
+        shares: shares
+          .filter((s) => mine.has(s.id))
+          .map((s) => ({ id: s.id, title: s.title, url: s.external_url ?? `${config.publicUrl}/s/${s.token}`, revoked: s.revoked_at !== null, snapshot: s.external_url !== null })),
         undoable: r.status === 'applied' && latest?.id === r.id,
         fileExpiry: Object.fromEntries(files.map((f) => [f.id, new Date(f.expires_at).toISOString()])),
-      } as Partial<CommandDto> & { fileExpiry: Record<string, string> });
+        fileDownloaded: files.filter((f) => f.downloaded).map((f) => f.id),
+      } as Partial<CommandDto> & { fileExpiry: Record<string, string>; fileDownloaded: string[] });
     }
     return out;
   }
@@ -869,13 +876,13 @@ export class CommandsService {
     return rows.map((r) => this.withExtras(this.view(r), more.get(r.id)));
   }
 
-  private withExtras(dto: CommandDto, more?: Partial<CommandDto> & { fileExpiry?: Record<string, string> }): CommandDto {
+  private withExtras(dto: CommandDto, more?: Partial<CommandDto> & { fileExpiry?: Record<string, string>; fileDownloaded?: string[] }): CommandDto {
     if (!more) return dto;
-    const { fileExpiry = {}, ...rest } = more;
+    const { fileExpiry = {}, fileDownloaded = [], ...rest } = more;
     return {
       ...dto,
       ...rest,
-      ...(dto.files ? { files: dto.files.map((f) => ({ ...f, expires_at: fileExpiry[f.id] ?? null, gone: !(f.id in fileExpiry) })) } : {}),
+      ...(dto.files ? { files: dto.files.map((f) => ({ ...f, expires_at: fileExpiry[f.id] ?? null, gone: !(f.id in fileExpiry), downloaded: fileDownloaded.includes(f.id) })) } : {}),
     };
   }
 
@@ -1285,17 +1292,19 @@ export class CommandsService {
         return out;
       }
       case 'update_menu': {
-        const before = await q.one<MenuItemDto & { updated_at: Date }>('select id, position, label, icon, description, action, updated_at from menu_items where id = $1 and user_id = $2', [i.id, uid]);
+        const before = await q.one<MenuItemDto & { updated_at: Date }>('select id, position, label, icon, description, action, pinned, updated_at from menu_items where id = $1 and user_id = $2', [
+          i.id,
+          uid,
+        ]);
         if (!before) bad('고치려는 메뉴가 없어졌습니다.');
         // 순서와 함께 각 메뉴의 고친 시각도 남긴다 — 되돌릴 때 원래대로 돌려야 더 앞선 명령도 이어서 되돌릴 수 있다
         const order = await q.query<{ id: string; updated_at: string }>('select id, updated_at from menu_items where user_id = $1 order by position, created_at', [uid]);
-        await q.query('update menu_items set label = coalesce($3, label), icon = coalesce($4, icon), description = coalesce($5, description), updated_at = now() where id = $1 and user_id = $2', [
-          i.id,
-          uid,
-          i.label ?? null,
-          i.icon ?? null,
-          i.description ?? null,
-        ]);
+        await q.query(
+          'update menu_items set label = coalesce($3, label), icon = coalesce($4, icon), description = coalesce($5, description), pinned = coalesce($6, pinned), updated_at = now() where id = $1 and user_id = $2',
+          [i.id, uid, i.label ?? null, i.icon ?? null, i.description ?? null, typeof i.pinned === 'boolean' ? i.pinned : null],
+        );
+        // 고정하면 맨 위로(순서를 따로 주지 않았을 때)
+        if (i.pinned === true && i.index === undefined) await this.menus.moveIn(q, uid, i.id, 0);
         if (i.index !== undefined) await this.menus.moveIn(q, uid, i.id, i.index);
         return [
           {
@@ -1463,13 +1472,14 @@ export class CommandsService {
               skipped.push(change.label);
               continue;
             }
-            await q.query('update menu_items set label = $3, icon = $4, description = $5, updated_at = $6 where id = $1 and user_id = $2', [
+            await q.query('update menu_items set label = $3, icon = $4, description = $5, pinned = coalesce($7, pinned), updated_at = $6 where id = $1 and user_id = $2', [
               change.id,
               uid,
               b.label,
               b.icon,
               b.description,
               b.updated_at,
+              typeof b.pinned === 'boolean' ? b.pinned : null,
             ]);
             // 순서는 적용 뒤에 사용자가 메뉴를 다시 늘어놓지 않았을 때만 되돌린다(늘어놓기도 updated_at 을 남긴다)
             if (Array.isArray(b.order)) {

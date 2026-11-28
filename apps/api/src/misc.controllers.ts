@@ -83,6 +83,12 @@ export class SettingsController {
     };
   }
 
+  /** AI 창 옆 비용 칩(2026-11-28): 이번 달 추정액·한도·마지막 요청 */
+  @Get('cost')
+  cost(@Auth() ctx: AuthCtx): Promise<{ month_cost: number; budget: number; last_cost: number | null; last_at: string | null }> {
+    return this.llm.costBrief(ctx.user);
+  }
+
   /** 일반 설정: 시간대·비용 한도·모델(USR-6). */
   @Put()
   async update(@Auth() ctx: AuthCtx, @Body() body: any): Promise<{ ok: true }> {

@@ -56,7 +56,7 @@ describe('Claude 스트림 해석', () => {
       assert.deepEqual(seen, ['날씨를', ' 확인할게요.']);
       assert.deepEqual(turn.toolCalls, [{ id: 'toolu_01', name: 'get_weather', input: { location: '서울' } }]);
       assert.equal(turn.stopReason, 'tool_use');
-      assert.deepEqual(turn.usage, { input_tokens: 472, output_tokens: 89 });
+      assert.deepEqual(turn.usage, { input_tokens: 472, output_tokens: 89, cache_read_tokens: 0, cache_write_tokens: 0 });
       assert.deepEqual(turn.content[1], { type: 'tool_use', id: 'toolu_01', name: 'get_weather', input: { location: '서울' } });
     }
   });
@@ -89,6 +89,18 @@ describe('Claude 스트림 해석', () => {
     assert.equal(costUsd('claude-opus-5-5', { input_tokens: 500_000, output_tokens: 0 }), 2);
     assert.equal(costUsd('unknown-model', { input_tokens: 1000, output_tokens: 1000 }), 0);
   });
+  it('캐시 읽기·저장도 가격에 넣는다(2026-11-28 문서 값)', () => {
+    // Sonnet 5.5: 캐시 읽기 $0.10, 5분 저장 $2.50 / 백만
+    assert.equal(costUsd('claude-sonnet-5-5', { input_tokens: 0, output_tokens: 0, cache_read_tokens: 1_000_000, cache_write_tokens: 0 }), 0.1);
+    assert.equal(costUsd('claude-sonnet-5-5', { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 1_000_000 }), 2.5);
+    assert.equal(costUsd('gpt-6.2-sol', { input_tokens: 0, output_tokens: 0, cache_read_tokens: 1_000_000 }), 0.1);
+  });
+  it('스트림에서 캐시 토큰을 읽는다', () => {
+    const acc = new StreamAccumulator();
+    acc.push({ type: 'message_start', message: { usage: { input_tokens: 10, output_tokens: 1, cache_read_input_tokens: 900, cache_creation_input_tokens: 50 } } });
+    acc.push({ type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 20 } });
+    assert.deepEqual(acc.result().usage, { input_tokens: 10, output_tokens: 20, cache_read_tokens: 900, cache_write_tokens: 50 });
+  });
 });
 
 // GPT(OpenAI Responses API) — 문서의 이벤트 이름으로 만든 스트림
@@ -113,7 +125,7 @@ describe('GPT(Responses API) 연결', () => {
       assert.equal(turn.text, '날씨를 볼게요.');
       assert.deepEqual(turn.toolCalls, [{ id: 'call_9', name: 'get_weather', input: { location: '서울' } }]);
       assert.equal(turn.stopReason, 'tool_use');
-      assert.deepEqual(turn.usage, { input_tokens: 300, output_tokens: 40 });
+      assert.deepEqual(turn.usage, { input_tokens: 300, output_tokens: 40, cache_read_tokens: 0, cache_write_tokens: 0 });
       assert.equal(turn.content.length, 3);
     }
   });
@@ -122,12 +134,29 @@ describe('GPT(Responses API) 연결', () => {
     for await (const event of sseEvents(chunks(GPT_STREAM, 64))) acc.push(event);
     const turn = acc.result();
     const input = toInput([
-      { role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAA' } }, { type: 'document', title: 'a.pdf', source: { type: 'base64', media_type: 'application/pdf', data: 'BBB' } }, { type: 'text', text: '봐 줘' }] },
+      {
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAA' } },
+          { type: 'document', title: 'a.pdf', source: { type: 'base64', media_type: 'application/pdf', data: 'BBB' } },
+          { type: 'text', text: '봐 줘' },
+        ],
+      },
       { role: 'assistant', content: turn.content },
-      new OpenAiAdapter().toolResults([{ id: 'call_9', content: '{"temp":3}' }, { id: 'call_8', content: '없음', isError: true }]),
+      new OpenAiAdapter().toolResults([
+        { id: 'call_9', content: '{"temp":3}' },
+        { id: 'call_8', content: '없음', isError: true },
+      ]),
       { role: 'assistant', content: '옛 답' },
     ]);
-    assert.deepEqual(input[0], { role: 'user', content: [{ type: 'input_image', image_url: 'data:image/png;base64,AAA' }, { type: 'input_file', filename: 'a.pdf', file_data: 'data:application/pdf;base64,BBB' }, { type: 'input_text', text: '봐 줘' }] });
+    assert.deepEqual(input[0], {
+      role: 'user',
+      content: [
+        { type: 'input_image', image_url: 'data:image/png;base64,AAA' },
+        { type: 'input_file', filename: 'a.pdf', file_data: 'data:application/pdf;base64,BBB' },
+        { type: 'input_text', text: '봐 줘' },
+      ],
+    });
     assert.deepEqual(input[1], { id: 'rs_1', type: 'reasoning', summary: [], encrypted_content: 'gAAA' });
     assert.equal(input[2].id, undefined);
     assert.equal(input[2].type, 'message');
@@ -138,7 +167,10 @@ describe('GPT(Responses API) 연결', () => {
   });
   it('도구 없이 끝나면 end_turn, 실패 이벤트는 예외', () => {
     const acc = new ResponsesAccumulator();
-    acc.push({ type: 'response.completed', response: { status: 'completed', usage: { input_tokens: 1, output_tokens: 2 }, output: [{ type: 'message', content: [{ type: 'output_text', text: '네' }] }] } });
+    acc.push({
+      type: 'response.completed',
+      response: { status: 'completed', usage: { input_tokens: 1, output_tokens: 2 }, output: [{ type: 'message', content: [{ type: 'output_text', text: '네' }] }] },
+    });
     assert.equal(acc.result().stopReason, 'end_turn');
     assert.equal(acc.result().text, '네');
     assert.throws(() => new ResponsesAccumulator().push({ type: 'response.failed', response: { error: { message: 'boom' } } }), /GPT 요청이 실패/);
@@ -151,7 +183,13 @@ describe('GPT(Responses API) 연결', () => {
       return new Response(GPT_STREAM + '\n\n', { status: 200 });
     }) as typeof fetch;
     try {
-      const turn = await new OpenAiAdapter().stream({ apiKey: 'sk-test', model: 'gpt-6.2-sol', system: '지시', messages: [{ role: 'user', content: '안녕' }], tools: [{ name: 'get_weather', description: 'd', input_schema: { type: 'object', properties: {} } }] });
+      const turn = await new OpenAiAdapter().stream({
+        apiKey: 'sk-test',
+        model: 'gpt-6.2-sol',
+        system: '지시',
+        messages: [{ role: 'user', content: '안녕' }],
+        tools: [{ name: 'get_weather', description: 'd', input_schema: { type: 'object', properties: {} } }],
+      });
       assert.equal(turn.toolCalls[0].name, 'get_weather');
     } finally {
       globalThis.fetch = orig;
@@ -167,5 +205,10 @@ describe('GPT(Responses API) 연결', () => {
   });
   it('GPT 모델 값도 비용에 들어간다', () => {
     assert.equal(costUsd('gpt-6.2-sol', { input_tokens: 1_000_000, output_tokens: 100_000 }), 3);
+  });
+  it('GPT 의 캐시 읽기는 입력에서 떼어 센다', () => {
+    const acc = new ResponsesAccumulator();
+    acc.push({ type: 'response.completed', response: { status: 'completed', output: [], usage: { input_tokens: 1000, output_tokens: 5, input_tokens_details: { cached_tokens: 800 } } } });
+    assert.deepEqual(acc.result().usage, { input_tokens: 200, output_tokens: 5, cache_read_tokens: 800, cache_write_tokens: 0 });
   });
 });

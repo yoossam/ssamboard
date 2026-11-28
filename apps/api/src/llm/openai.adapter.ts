@@ -12,6 +12,13 @@ import { sseEvents } from './anthropic.adapter';
 
 type Item = Record<string, any>;
 
+/** OpenAI 의 input_tokens 는 캐시 읽기를 포함한다 — 캐시 읽기를 따로 떼어 Claude 와 같은 모양으로 맞춘다 */
+function openaiUsage(u: any): LlmUsage {
+  const input = Number(u?.input_tokens ?? 0);
+  const cached = Math.min(input, Number(u?.input_tokens_details?.cached_tokens ?? 0));
+  return { input_tokens: input - cached, output_tokens: Number(u?.output_tokens ?? 0), cache_read_tokens: cached, cache_write_tokens: 0 };
+}
+
 /** Claude 형식 메시지 → Responses 입력 항목 */
 export function toInput(messages: LlmMessage[]): Item[] {
   const out: Item[] = [];
@@ -90,10 +97,7 @@ export class ResponsesAccumulator {
         const r = event.response ?? {};
         if (Array.isArray(r.output)) this.output = r.output;
         this.status = String(r.status ?? event.type.slice(9));
-        this.usage = {
-          input_tokens: Number(r.usage?.input_tokens ?? 0),
-          output_tokens: Number(r.usage?.output_tokens ?? 0),
-        };
+        this.usage = openaiUsage(r.usage);
         break;
       }
       case 'response.failed':
@@ -217,10 +221,7 @@ export class OpenAiAdapter implements LlmAdapter {
     try {
       return {
         data: JSON.parse(text) as T,
-        usage: {
-          input_tokens: body.usage?.input_tokens ?? 0,
-          output_tokens: body.usage?.output_tokens ?? 0,
-        },
+        usage: openaiUsage(body.usage),
       };
     } catch {
       throw new LlmError('GPT 의 답을 읽지 못했습니다.');
