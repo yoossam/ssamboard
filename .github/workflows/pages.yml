@@ -34,6 +34,9 @@ jobs:
           VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
           VITE_GOOGLE_PICKER_API_KEY: ${{ vars.VITE_GOOGLE_PICKER_API_KEY }}
           VITE_GOOGLE_APP_ID: ${{ vars.VITE_GOOGLE_APP_ID }}
+          # 개인정보 처리방침의 보호책임자(선택 — 비우면 '저장소 관리자'·Issues 로 나온다)
+          VITE_PRIVACY_OFFICER: ${{ vars.VITE_PRIVACY_OFFICER }}
+          VITE_PRIVACY_CONTACT: ${{ vars.VITE_PRIVACY_CONTACT }}
           VITE_SERVER_TRACK_URL: https://github.com/${{ github.repository }}#서버-트랙
       - uses: actions/upload-pages-artifact@v3
         with:

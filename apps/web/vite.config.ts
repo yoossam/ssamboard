@@ -77,7 +77,13 @@ function localCsp(): Plugin {
       // 개인정보처리방침(구글 동의 화면에 적는 주소) — 문의 링크는 공개 저장소 주소(Pages 빌드의 서버 트랙 안내 주소에서 뗀다)
       const repo = (process.env.VITE_SERVER_TRACK_URL ?? '').split('#')[0].replace(/\/$/, '') || 'https://github.com';
       const privacy = readFileSync(fileURLToPath(new URL('./local-public/privacy.html', import.meta.url)), 'utf8');
-      this.emitFile({ type: 'asset', fileName: 'privacy.html', source: privacy.replaceAll('__REPO_URL__', repo) });
+      // 보호책임자 이름·연락처는 코드에 적지 않고 Pages 빌드 변수로 받는다(없으면 저장소 관리자·Issues).
+      const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+      const officer = esc(process.env.VITE_PRIVACY_OFFICER?.trim() || '쌤보드 공개 저장소 관리자');
+      const mail = process.env.VITE_PRIVACY_CONTACT?.trim();
+      const issues = `<a href="${repo}/issues" rel="noreferrer">공개 저장소 Issues</a>`;
+      const contact = mail ? `<a href="mailto:${esc(mail)}">${esc(mail)}</a> · ${issues}` : issues;
+      this.emitFile({ type: 'asset', fileName: 'privacy.html', source: privacy.replaceAll('__REPO_URL__', repo).replaceAll('__OFFICER__', officer).replaceAll('__CONTACT__', contact) });
     },
     configureServer(server) {
       server.middlewares.use(`/${LOCAL_VIEW_SCRIPT}`, (_req, res) => {
