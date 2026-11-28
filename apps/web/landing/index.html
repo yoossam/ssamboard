@@ -4,97 +4,130 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>쌤보드 — 선생님의 한 페이지 업무 보드</title>
-<meta name="description" content="할 일·일정·표·메모를 한 화면에, 말로 시키면 AI 가 정리·수합·시각화. 구글 드라이브 간편판과 서버 설치판 중 골라 쓰세요." />
+<meta name="description" content="할 일·일정·표·메모를 한 화면에. 말로 시키면 AI 가 정리하고 수합합니다. 설치 없는 간편판과 내 서버 설치판 중 고르세요." />
 <meta name="theme-color" content="#F0F0E0" />
 <link rel="icon" href="./app/icon.svg" type="image/svg+xml" />
 <!--
   공개 주소 첫 화면(두 트랙 고르기). scripts/build-pages.mjs 가 __REPO_URL__ 을 공개 저장소 주소로 바꿔 Pages 맨 위에 둔다.
+  디자인: Astryx 말차(앱 styles.css 와 같은 색·모서리 역할 6·10·12·24·움직임 곡선), 묶음마다 강조 하나, 테두리로만 띄움.
   간편판 앱은 ./app/, 사용 안내 ./guide.html, 개인정보 처리방침 ./privacy.html.
 -->
 <style>
-  :root { --ground: #f0f0e0; --card: #fbfbf4; --ink: #2b3214; --sub: #5d6640; --accent: #3e481d; --line: #d9dbc2; --tint: #e3e6c8; }
+  @font-face { font-family: 'A2Z'; src: url('./app/fonts/a2z-400.woff2') format('woff2'); font-weight: 1 500; font-display: swap; }
+  @font-face { font-family: 'A2Z'; src: url('./app/fonts/a2z-500.woff2') format('woff2'); font-weight: 501 1000; font-display: swap; }
+  :root {
+    --ground: #f0f0e0; --card: #ffffff; --line: #dce3ce; --rule: #e9eddd; --ink: #3e481d; --sub: #5a6b2a;
+    --accent: #3e481d; --tint: rgb(62 72 29 / 0.08); --tag: #e8ebd6;
+    --r-inner: 6px; --r-el: 10px; --r-card: 12px; --r-page: 24px; --ease: cubic-bezier(0.24, 1, 0.4, 1);
+  }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--ground); color: var(--ink); font: 16px/1.7 system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; }
-  main { max-width: 960px; margin: 0 auto; padding: 48px 20px 64px; }
-  header { text-align: center; margin-bottom: 36px; }
-  .mark { width: 64px; height: 64px; border-radius: 999px; background: var(--tint); display: inline-flex; align-items: center; justify-content: center; font-size: 28px; color: var(--accent); }
-  h1 { font-size: 2rem; margin: 14px 0 6px; }
-  .lead { color: var(--sub); margin: 0 auto; max-width: 560px; }
-  .motto { margin-top: 10px; font-weight: 600; color: var(--accent); }
+  html { font-size: 18px; }
+  body { margin: 0; background: var(--ground); color: var(--ink); font-family: 'A2Z', 'Noto Sans KR', 'Apple SD Gothic Neo', system-ui, sans-serif; line-height: 1.6; word-break: keep-all; overflow-wrap: anywhere; -webkit-font-smoothing: antialiased; }
+  main { max-width: 1040px; margin: 0 auto; padding: 72px 24px 56px; }
+  a { color: inherit; }
+
+  /* 맨 위: 이름과 한 줄 */
+  .hero { text-align: center; margin-bottom: 48px; }
+  .hero h1 { font-size: clamp(2.6rem, 6vw, 3.6rem); line-height: 1.15; margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+  .hero .one { font-size: clamp(1.25rem, 2.6vw, 1.55rem); margin: 16px 0 0; }
+  .hero .motto { display: inline-block; margin-top: 20px; padding: 6px 16px; border-radius: 999px; background: var(--tag); color: var(--sub); font-size: 1rem; }
+
+  /* 요점 셋 */
+  .points { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 48px; }
+  .point { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-card); padding: 22px 22px 20px; }
+  .point .n { display: inline-flex; width: 36px; height: 36px; border-radius: var(--r-el); background: var(--tint); align-items: center; justify-content: center; font-size: 1.15rem; }
+  .point h3 { font-size: 1.25rem; margin: 14px 0 4px; font-weight: 600; }
+  .point p { margin: 0; color: var(--sub); font-size: 1.02rem; }
+
+  /* 두 판 고르기 */
+  .choose-title { font-size: 1.5rem; font-weight: 600; text-align: center; margin: 0 0 20px; }
   .tracks { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  .track { background: var(--card); border: 1px solid var(--line); border-radius: 24px; padding: 28px 24px; display: flex; flex-direction: column; }
-  .track h2 { margin: 0 0 4px; font-size: 1.25rem; }
-  .track .who { color: var(--sub); font-size: .92rem; margin: 0 0 12px; }
-  .track ul { padding-left: 1.2em; margin: 0 0 18px; flex: 1; }
-  .track li { margin: 4px 0; font-size: .95rem; }
-  .btn { display: block; text-align: center; padding: 12px 16px; border-radius: 999px; font-weight: 600; text-decoration: none; transition: transform .125s cubic-bezier(.24,1,.4,1); }
-  .btn:active { transform: scale(.98); }
-  .primary { background: var(--accent); color: #f0f0e0; }
-  .secondary { border: 1px solid var(--accent); color: var(--accent); }
-  .tag { align-self: flex-start; display: inline-block; font-size: .78rem; padding: 0 10px; border-radius: 999px; background: var(--tint); color: var(--accent); margin-bottom: 10px; }
-  section.more { margin-top: 36px; background: var(--card); border: 1px solid var(--line); border-radius: 24px; padding: 24px; }
-  table { width: 100%; border-collapse: collapse; font-size: .92rem; }
-  th, td { border-bottom: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
-  th { color: var(--sub); font-weight: 600; }
-  footer { margin-top: 28px; text-align: center; font-size: .88rem; color: var(--sub); }
-  footer a, .more a { color: var(--accent); }
-  #resume { display: none; margin: 0 auto 24px; max-width: 420px; }
-  @media (max-width: 720px) { .tracks { grid-template-columns: 1fr; } h1 { font-size: 1.6rem; } }
+  .track { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-page); padding: 32px 28px 28px; display: flex; flex-direction: column; }
+  .track .label { align-self: flex-start; font-size: .88rem; padding: 3px 12px; border-radius: var(--r-inner); background: var(--tag); color: var(--sub); }
+  .track h2 { font-size: 1.75rem; margin: 14px 0 18px; font-weight: 600; }
+  .track ul { list-style: none; margin: 0 0 28px; padding: 0; flex: 1; }
+  .track li { font-size: 1.15rem; padding: 10px 0; border-top: 1px solid var(--rule); display: flex; gap: 10px; }
+  .track li:first-child { border-top: 0; }
+  .track li::before { content: '✓'; color: var(--sub); flex: none; }
+  .track li.no::before { content: '—'; }
+  .track li.no { color: var(--sub); }
+  .btn { display: block; text-align: center; padding: 16px 20px; border-radius: 999px; font-size: 1.15rem; font-weight: 600; text-decoration: none; transition: transform 125ms var(--ease), background-color 300ms var(--ease); }
+  .btn:active { transform: scale(0.98); }
+  .btn:focus-visible { outline: 3px solid var(--sub); outline-offset: 3px; }
+  .primary { background: var(--accent); color: var(--ground); }
+  .primary:hover { background: #4b5824; }
+  .secondary { border: 1.5px solid var(--accent); color: var(--accent); }
+  .secondary:hover { background: var(--tint); }
+  .note { text-align: center; color: var(--sub); font-size: 1rem; margin: 20px 0 0; }
+
+  #resume { display: none; max-width: 440px; margin: -16px auto 40px; }
+
+  footer { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: center; font-size: 1rem; color: var(--sub); }
+  footer a { text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+
+  @media (max-width: 760px) {
+    main { padding-top: 48px; }
+    .points, .tracks { grid-template-columns: 1fr; }
+    .track { padding: 26px 22px 22px; }
+    .hero .motto { border-radius: var(--r-card); padding: 8px 14px; }
+    .points { gap: 8px; }
+    .point { display: grid; grid-template-columns: 36px 1fr; column-gap: 14px; align-items: center; padding: 16px 18px; }
+    .point .n { grid-row: span 2; }
+    .point h3 { margin: 0; font-size: 1.15rem; }
+    .point p { font-size: .95rem; }
+  }
+  @media (prefers-reduced-motion: reduce) { .btn { transition: none; } }
 </style>
 </head>
 <body>
 <main>
-<header>
-  <div class="mark" aria-hidden="true">✦</div>
+<header class="hero">
   <h1>쌤보드</h1>
-  <p class="lead">할 일·일정·표·메모를 한 화면에 모아 두고, 말로 시키면 AI(Claude·GPT)가 정리하고 수합하고 그림으로 보여 주는 선생님의 업무 보드</p>
-  <p class="motto">쉽게 일하고, 쉽게 전달하고, 쉽게 수합하고, 모든 일은 AI 를 시키자.</p>
+  <p class="one">선생님 일을 한 화면에. 말로 시키면 AI 가 정리합니다.</p>
+  <span class="motto">쉽게 일하고 · 쉽게 전달하고 · 쉽게 수합하고 · AI 를 시키자</span>
 </header>
 
 <a id="resume" class="btn primary" href="./app/">내 보드 이어서 열기</a>
 
+<section class="points" aria-label="쌤보드로 하는 일">
+  <div class="point"><span class="n" aria-hidden="true">▦</span><h3>한 화면에 모으기</h3><p>할 일 · 일정 · 표 · 메모</p></div>
+  <div class="point"><span class="n" aria-hidden="true">✦</span><h3>말로 시키기</h3><p>Claude · GPT 가 정리하고 그려 줌</p></div>
+  <div class="point"><span class="n" aria-hidden="true">⇄</span><h3>쉽게 수합</h3><p>구글 설문 · 시트로 자동 정리</p></div>
+</section>
+
+<h2 class="choose-title">어떻게 쓰실래요?</h2>
 <div class="tracks">
   <div class="track">
-    <span class="tag">설치 없음 · 무료</span>
-    <h2>구글 드라이브 간편판</h2>
-    <p class="who">이 주소에서 바로 시작하고 싶은 분</p>
+    <span class="label">설치 없음 · 무료</span>
+    <h2>간편판</h2>
     <ul>
-      <li>구글 계정으로 로그인하면 끝 — 설치할 것이 없습니다.</li>
-      <li>자료는 <b>내 구글 드라이브의 숨은 앱 폴더</b>에 저장되고, 하루 한 번 백업합니다.</li>
-      <li>같은 계정이면 컴퓨터·휴대폰 어디서나 같은 보드. 인터넷이 끊겨도 열립니다.</li>
-      <li>앱을 닫아 둔 동안 저절로 하는 일(일정 알림·시트 자동 맞춤)은 없습니다.</li>
+      <li>구글 로그인 한 번이면 시작</li>
+      <li>자료는 내 구글 드라이브에</li>
+      <li>컴퓨터 · 휴대폰 어디서나</li>
+      <li class="no">앱을 닫으면 알림은 쉼</li>
     </ul>
     <a class="btn primary" href="./app/">간편판 시작하기</a>
   </div>
   <div class="track">
-    <span class="tag">내 서버 · 모든 기능</span>
+    <span class="label">내 서버 · 모든 기능</span>
     <h2>서버 설치판</h2>
-    <p class="who">학교·집 컴퓨터에 직접 설치해 늘 켜 두고 쓰실 분</p>
     <ul>
-      <li>Docker 가 있는 컴퓨터에서 저장소를 받아 설치 명령 한 번(약 10분).</li>
-      <li>자료는 <b>내 서버의 데이터베이스</b>에 — PIN 잠금, 여러 기기 관리.</li>
-      <li>일정 10분 전 알림, 시트·설문 자동 다시 읽기, 웹훅까지 모두 됩니다.</li>
-      <li>저장소를 <b>포크</b>하면 내 것으로 가져가 고쳐 쓸 수 있습니다(MIT).</li>
+      <li>설치 명령 한 번(약 10분)</li>
+      <li>자료는 내 서버에, PIN 잠금</li>
+      <li>일정 알림 · 자동 수합 늘 켜짐</li>
+      <li>포크해서 내 것으로 고쳐 쓰기</li>
     </ul>
-    <a class="btn secondary" href="__REPO_URL__#서버-트랙">설치 안내 보기 (GitHub)</a>
+    <a class="btn secondary" href="__REPO_URL__#서버-트랙">설치 안내 보기</a>
   </div>
 </div>
-
-<section class="more">
-  <table>
-    <tr><th></th><th>간편판</th><th>서버 설치판</th></tr>
-    <tr><td>시작</td><td>주소 열고 구글 로그인</td><td>Docker 설치 후 명령 한 번</td></tr>
-    <tr><td>자료 위치</td><td>내 브라우저 + 내 구글 드라이브</td><td>내 서버</td></tr>
-    <tr><td>AI</td><td colspan="2">Claude 또는 GPT — 내 API 열쇠로(열쇠가 없어도 보드는 씀)</td></tr>
-    <tr><td>보드·표·AI 화면·시트·설문</td><td>됨</td><td>됨</td></tr>
-    <tr><td>앱을 닫아도 도는 일</td><td>없음</td><td>알림·자동 동기화·웹훅</td></tr>
-    <tr><td>옮기기</td><td colspan="2">설정에서 내보내기·가져오기로 두 판 사이를 오갈 수 있습니다</td></tr>
-  </table>
-  <p style="margin:14px 0 0;font-size:.92rem">두 판은 같은 코드라 기능이 함께 늘어납니다. 자세한 쓰는 법은 <a href="./guide.html">사용 안내</a>에 있습니다.</p>
-</section>
+<p class="note">AI 는 내 API 열쇠로 씁니다(열쇠 없이도 보드는 쓸 수 있어요). 두 판 사이 자료 옮기기도 됩니다.</p>
 
 <footer>
-  <a href="./guide.html">사용 안내</a> · <a href="./privacy.html">개인정보 처리방침</a> · <a href="__REPO_URL__">소스 코드(GitHub)</a> · <a href="__REPO_URL__/issues">문의</a>
+  <a href="./guide.html">사용 안내</a>
+  <a href="./privacy.html">개인정보 처리방침</a>
+  <a href="__REPO_URL__">소스 코드</a>
+  <a href="__REPO_URL__/issues">문의</a>
 </footer>
 </main>
 <script>
