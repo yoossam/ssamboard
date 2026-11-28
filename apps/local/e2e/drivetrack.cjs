@@ -11,12 +11,14 @@ async function google(route) {
   if (m === 'OPTIONS') return route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' } });
   if (url.pathname.endsWith('/userinfo')) return json({ email: 'teacher@example.com', name: '김선생' });
   const id = (url.pathname.match(/\/files\/([^/]+)/) || [])[1];
-  const meta = (k) => ({ id: k, name: files.get(k).name, version: String(files.get(k).version), modifiedTime: 'x' });
+  const meta = (k) => ({ id: k, name: files.get(k).name, version: String(files.get(k).version), modifiedTime: 'x', appProperties: files.get(k).appProperties });
+  const parts = (body) => { const p = body.split(/--ssamboard\w+/); return { meta: JSON.parse(p[1].split('\r\n\r\n')[1]), content: p[2].split('\r\n\r\n').slice(1).join('\r\n\r\n').replace(/\r\n$/, '') }; };
   if (m === 'GET' && !id) { const q = url.searchParams.get('q') || ''; const eq = /name = '([^']+)'/.exec(q)?.[1]; const has = /name contains '([^']+)'/.exec(q)?.[1]; return json({ files: [...files.keys()].filter((k) => eq ? files.get(k).name === eq : has ? files.get(k).name.includes(has) : true).map(meta) }); }
   if (m === 'GET' && id) return route.fulfill({ status: 200, body: files.get(id).body, headers: { 'access-control-allow-origin': '*' } });
-  if (m === 'POST' && url.pathname.endsWith('/copy')) { const n = 'f' + ++seq; files.set(n, { ...files.get(id), name: JSON.parse(req.postData()).name, version: 1 }); return json({ id: n }); }
-  if (m === 'POST') { const body = req.postData(); const parts = body.split(/--ssamboard\w+/); const metaJ = JSON.parse(parts[1].split('\r\n\r\n')[1]); const content = parts[2].split('\r\n\r\n').slice(1).join('\r\n\r\n').replace(/\r\n$/, ''); const n = 'f' + ++seq; files.set(n, { name: metaJ.name, body: content, version: 1 }); return json(meta(n)); }
-  if (m === 'PATCH') { const f = files.get(id); f.body = req.postData(); f.version++; return json(meta(id)); }
+  // 진짜 드라이브처럼 복사하면 원본 version 도 오른다
+  if (m === 'POST' && url.pathname.endsWith('/copy')) { const src = files.get(id); const n = 'f' + ++seq; files.set(n, { ...src, name: JSON.parse(req.postData()).name, version: 1 }); src.version++; return json({ id: n }); }
+  if (m === 'POST') { const { meta: mj, content } = parts(req.postData()); const n = 'f' + ++seq; files.set(n, { name: mj.name, body: content, version: 1, appProperties: mj.appProperties }); return json(meta(n)); }
+  if (m === 'PATCH') { const f = files.get(id); const { meta: mj, content } = parts(req.postData()); f.body = content; f.appProperties = { ...f.appProperties, ...mj.appProperties }; f.version++; return json(meta(id)); }
   if (m === 'DELETE') { files.delete(id); return route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*' } }); }
   return route.fulfill({ status: 400 });
 }

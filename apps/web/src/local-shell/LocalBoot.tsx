@@ -161,6 +161,10 @@ export function LocalBoot({ children }: { children: ReactNode }) {
         )}
       </ul>
       <p className="mt-4 text-center text-xs text-sub">
+        <a className="underline" href="./guide.html">
+          사용 안내
+        </a>
+        {' · '}
         <a className="underline" href="./privacy.html">
           개인정보처리방침
         </a>

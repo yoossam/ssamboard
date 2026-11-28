@@ -12,7 +12,7 @@
   },
   "scripts": {
     "build": "npm run build -w @jarvis/shared && npm run build -w @jarvis/api && npm run build -w @jarvis/web",
-    "test": "npm run build -w @jarvis/shared && npm test -w @jarvis/shared && npm test -w @jarvis/api && npm test -w @jarvis/local",
+    "test": "node scripts/check-guide.mjs && npm run build -w @jarvis/shared && npm test -w @jarvis/shared && npm test -w @jarvis/api && npm test -w @jarvis/local",
     "dev:shared": "npm run dev -w @jarvis/shared",
     "dev:api": "npm run dev -w @jarvis/api",
     "dev:web": "npm run dev -w @jarvis/web",

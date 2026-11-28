@@ -56,6 +56,8 @@ test('구글 드라이브 맞춤: 올리기·다른 기기 받기·충돌·열�
   assert.deepEqual(r.uploadedTasks, ['A 에서 만든 할 일']);
   assert.equal(r.secretLeak, false);
   assert.deepEqual(r.backups, ['backup-2026-11-27.json']);
+  // 드라이브가 version 을 저절로 올려도(복사·서버 쪽 일) 같은 기기의 다음 저장은 충돌이 아니다(2026-11-28 실제 드라이브)
+  assert.equal(r.stateAfterServerBump, 'saved');
   assert.equal(r.openB, 'downloaded');
   assert.deepEqual(r.tasksB, ['A 에서 만든 할 일']);
   assert.equal(r.boardB, 200);

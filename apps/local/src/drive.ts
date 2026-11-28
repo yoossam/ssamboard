@@ -2,7 +2,8 @@
  * 구글 드라이브 맞춤(구글 드라이브 트랙).
  * - 자료는 브라우저 안 PGlite 에 바로 저장하고, 내 자료만 JSON 하나(ssamboard-data.json)로 드라이브 '앱 폴더'에 올린다.
  *   앱 폴더(appDataFolder)는 이 앱만 읽고 쓰는 숨은 폴더다 — 드라이브 화면에 보이지 않고 운영자도 볼 수 없다.
- * - 올리기 전에 드라이브 파일의 판 번호(version)를 보고, 다른 기기가 먼저 올렸으면 덮어쓰지 않고 묻는다.
+ * - 올릴 때마다 파일 속성(appProperties.ssamRev)에 새 표시를 달고, 올리기 전에 그 표시를 보고 다른 기기가 먼저 올렸으면 덮어쓰지 않고 묻는다.
+ *   (드라이브의 판 번호 version 은 쓰지 않는다 — 구글이 복사·색인 같은 서버 쪽 일에도 올려서 늘 충돌로 보였다, 2026-11-28 실제 드라이브에서 잡힘)
  * - 하루 한 번 backup-YYYY-MM-DD.json 을 남기고 14개까지 둔다.
  * 열쇠(api_keys)·세션·감사 기록·로컬 상태(app_meta)는 올리지 않는다.
  */
@@ -49,7 +50,15 @@ interface DriveFile {
   name: string;
   version: string;
   modifiedTime: string;
+  appProperties?: Record<string, string>;
 }
+
+const FIELDS = 'id,name,version,modifiedTime,appProperties';
+/** 우리가 올린 판의 표시. 표시가 없는 옛 파일은 version 으로(옛 기기와 한 번은 맞게). */
+export function revOf(f: DriveFile): string {
+  return f.appProperties?.ssamRev ?? f.version;
+}
+const newRev = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
 export type SyncState = 'idle' | 'saving' | 'saved' | 'offline' | 'conflict' | 'error';
 
@@ -92,7 +101,7 @@ export class DriveSync {
 
   private async find(name: string): Promise<DriveFile | null> {
     const q = encodeURIComponent(`name = '${name}' and trashed = false`);
-    const res = await this.call(`${API}?spaces=appDataFolder&q=${q}&fields=files(id,name,version,modifiedTime)&orderBy=modifiedTime desc`);
+    const res = await this.call(`${API}?spaces=appDataFolder&q=${q}&fields=files(${FIELDS})&orderBy=modifiedTime desc`);
     return ((await res.json()) as { files: DriveFile[] }).files[0] ?? null;
   }
 
@@ -101,14 +110,12 @@ export class DriveSync {
   }
 
   private async upload(existing: DriveFile | null, data: SyncData): Promise<DriveFile> {
-    const body = JSON.stringify(data);
-    if (existing) {
-      const res = await this.call(`${UPLOAD}/${existing.id}?uploadType=media&fields=id,name,version,modifiedTime`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body });
-      return (await res.json()) as DriveFile;
-    }
+    // 내용과 표시를 한 요청으로(멀티파트) — 표시만 따로 바꾸면 그 사이에 끊길 수 있다.
+    const meta = existing ? { appProperties: { ssamRev: newRev() } } : { name: DATA_FILE, parents: ['appDataFolder'], appProperties: { ssamRev: newRev() } };
     const boundary = 'ssamboard' + Math.random().toString(36).slice(2);
-    const multipart = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify({ name: DATA_FILE, parents: ['appDataFolder'] })}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${body}\r\n--${boundary}--`;
-    const res = await this.call(`${UPLOAD}?uploadType=multipart&fields=id,name,version,modifiedTime`, { method: 'POST', headers: { 'Content-Type': `multipart/related; boundary=${boundary}` }, body: multipart });
+    const multipart = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(data)}\r\n--${boundary}--`;
+    const url = existing ? `${UPLOAD}/${existing.id}?uploadType=multipart&fields=${FIELDS}` : `${UPLOAD}?uploadType=multipart&fields=${FIELDS}`;
+    const res = await this.call(url, { method: existing ? 'PATCH' : 'POST', headers: { 'Content-Type': `multipart/related; boundary=${boundary}` }, body: multipart });
     return (await res.json()) as DriveFile;
   }
 
@@ -128,7 +135,7 @@ export class DriveSync {
         await this.flush(true);
         return 'uploaded';
       }
-      if (remote.version === synced) {
+      if (revOf(remote) === synced) {
         if (dirty) await this.flush();
         return 'same';
       }
@@ -151,7 +158,7 @@ export class DriveSync {
     if (!file) return;
     await importData(this.db, await this.download(file.id));
     await setMeta(this.db, 'drive_file', file.id);
-    await setMeta(this.db, 'drive_version', file.version);
+    await setMeta(this.db, 'drive_version', revOf(file));
     await setMeta(this.db, 'drive_dirty', null);
     this.set('saved');
   }
@@ -184,7 +191,7 @@ export class DriveSync {
       try {
         const remote = await this.find(DATA_FILE);
         const synced = await meta(this.db, 'drive_version');
-        if (!force && remote && remote.version !== synced) {
+        if (!force && remote && revOf(remote) !== synced) {
           this.set('conflict', '다른 기기에서 바뀐 자료가 있습니다.');
           return;
         }
@@ -192,7 +199,7 @@ export class DriveSync {
         const mark = await meta(this.db, 'drive_dirty');
         const saved = await this.upload(remote, await exportData(this.db));
         await setMeta(this.db, 'drive_file', saved.id);
-        await setMeta(this.db, 'drive_version', saved.version);
+        await setMeta(this.db, 'drive_version', revOf(saved));
         // 번호가 그대로일 때만 지운다 — 비교와 지우기를 한 문장으로(그 사이 새 변경이 끼어도 지우지 않게, 코덱스 재확인).
         if (mark !== null) await this.db.query("delete from app_meta where key = 'drive_dirty' and value = $1", [mark]);
         await this.backupDaily(saved.id);

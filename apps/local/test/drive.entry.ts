@@ -4,9 +4,11 @@ import { DriveSync, exportData, importData, SYNC_TABLES, LOCAL_ONLY_TABLES } fro
 
 /** 가짜 구글 드라이브: 앱 폴더 파일을 메모리에 둔다. */
 function fakeDrive() {
-  const files = new Map<string, { name: string; body: string; version: number; modifiedTime: string }>();
+  // 진짜 드라이브처럼 version 은 서버 쪽 일(복사 등)에도 오른다 — 충돌 판단에 version 을 쓰면 늘 충돌로 보인다(2026-11-28 실제 드라이브에서 잡힘).
+  const files = new Map<string, { name: string; body: string; version: number; modifiedTime: string; appProperties?: Record<string, string> }>();
   let seq = 0;
-  const meta = (id: string) => { const f = files.get(id)!; return { id, name: f.name, version: String(f.version), modifiedTime: f.modifiedTime }; };
+  const meta = (id: string) => { const f = files.get(id)!; return { id, name: f.name, version: String(f.version), modifiedTime: f.modifiedTime, appProperties: f.appProperties }; };
+  const parts = (body: string) => { const p = body.split(/--ssamboard\w+/); return { meta: JSON.parse(p[1].split('\r\n\r\n')[1]), content: p[2].split('\r\n\r\n').slice(1).join('\r\n\r\n').replace(/\r\n$/, '') }; };
   const ok = (v: unknown) => new Response(JSON.stringify(v), { status: 200, headers: { 'Content-Type': 'application/json' } });
   const fetchFn = async (input: any, init: any = {}) => {
     const url = new URL(String(input));
@@ -20,9 +22,9 @@ function fakeDrive() {
       return ok({ files: [...files.keys()].filter((k) => (eq ? files.get(k)!.name === eq : has ? files.get(k)!.name.includes(has) : true)).map(meta) });
     }
     if (method === 'GET' && id) return new Response(files.get(id)!.body, { status: 200 });
-    if (method === 'POST' && copy) { const n = 'f' + ++seq; files.set(n, { ...files.get(id!)!, name: JSON.parse(init.body).name, version: 1 }); return ok({ id: n }); }
-    if (method === 'POST') { const body = String(init.body); const parts = body.split(/--ssamboard\w+/); const metaJson = JSON.parse(parts[1].split('\r\n\r\n')[1]); const content = parts[2].split('\r\n\r\n').slice(1).join('\r\n\r\n').replace(/\r\n$/, ''); const n = 'f' + ++seq; files.set(n, { name: metaJson.name, body: content, version: 1, modifiedTime: new Date().toISOString() }); return ok(meta(n)); }
-    if (method === 'PATCH') { const f = files.get(id!)!; f.body = String(init.body); f.version++; f.modifiedTime = new Date().toISOString(); return ok(meta(id!)); }
+    if (method === 'POST' && copy) { const src = files.get(id!)!; const n = 'f' + ++seq; files.set(n, { ...src, name: JSON.parse(init.body).name, version: 1 }); src.version++; return ok({ id: n }); }
+    if (method === 'POST') { const { meta: mj, content } = parts(String(init.body)); const n = 'f' + ++seq; files.set(n, { name: mj.name, body: content, version: 1, modifiedTime: new Date().toISOString(), appProperties: mj.appProperties }); return ok(meta(n)); }
+    if (method === 'PATCH') { const f = files.get(id!)!; const { meta: mj, content } = parts(String(init.body)); f.body = content; f.appProperties = { ...f.appProperties, ...mj.appProperties }; f.version++; f.modifiedTime = new Date().toISOString(); return ok(meta(id!)); }
     if (method === 'DELETE') { files.delete(id!); return new Response(null, { status: 204 }); }
     return new Response('', { status: 400 });
   };
@@ -46,6 +48,15 @@ export async function run() {
   out.uploadedTasks = saved.tables.tasks.map((t: any) => t.title);
   out.secretLeak = JSON.stringify(saved).includes('secret-key');
   out.backups = [...drive.files.values()].filter((f) => f.name.startsWith('backup-')).map((f) => f.name);
+  // 같은 기기에서 또 고쳐 올려도 충돌이 아니어야 한다(하루 백업 복사·서버 쪽 일로 version 이 올라도)
+  for (const f of drive.files.values()) if (f.name === 'ssamboard-data.json') f.version += 5;
+  await appA.fetch('/api/tasks', { method: 'POST', body: JSON.stringify({ title: 'A 에서 이어서', due_at: null }) });
+  syncA.markDirty();
+  await syncA.flush();
+  out.stateAfterServerBump = syncA.state;
+  await dbA.query("delete from tasks where title = 'A 에서 이어서'");
+  syncA.markDirty();
+  await syncA.flush();
 
   // 기기 B: 새 브라우저 — 열면 A 의 자료를 받는다
   const dbB = await openLocalDb();
