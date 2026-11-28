@@ -3,8 +3,8 @@
 가짜 구글(로그인 도구·드라이브·시트·시트 고르기 창)을 Playwright 로 끼워 실제 브라우저에서 흐름을 본다. 진짜 구글·Claude 에는 닿지 않는다.
 
 ```bash
-VITE_GOOGLE_CLIENT_ID=test-client.apps.googleusercontent.com VITE_GOOGLE_PICKER_API_KEY=test-key VITE_GOOGLE_APP_ID=123 npm run build:local
-mkdir -p /tmp/ssb-pages && rm -rf /tmp/ssb-pages/ssamboard && cp -R apps/web/dist-local /tmp/ssb-pages/ssamboard
+VITE_GOOGLE_CLIENT_ID=test-client.apps.googleusercontent.com VITE_GOOGLE_PICKER_API_KEY=test-key VITE_GOOGLE_APP_ID=123 npm run build:pages
+mkdir -p /tmp/ssb-pages && rm -rf /tmp/ssb-pages/ssamboard && cp -R apps/web/dist-pages /tmp/ssb-pages/ssamboard   # 첫 화면 /ssamboard/, 앱 /ssamboard/app/
 (cd /tmp/ssb-pages && python3 -m http.server 4321 --bind 127.0.0.1 &)   # GitHub Pages 처럼 하위 주소 /ssamboard/
 PW=<@playwright/test 설치 경로>; OUT=/tmp/ssb-shots; mkdir -p $OUT
 node apps/local/e2e/drivetrack.cjs $PW $OUT   # 로그인→할 일→열쇠(PIN 없음)→드라이브 저장(열쇠 안 올림)→다른 기기 받기→바로 로그아웃

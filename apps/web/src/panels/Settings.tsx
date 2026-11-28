@@ -20,16 +20,75 @@ const pinReady = (pin: string) => LOCAL_TRACK || pin.length === PIN_LENGTH;
 
 const TIMEZONES = ['Asia/Seoul', 'Asia/Tokyo', 'Asia/Shanghai', 'Asia/Singapore', 'Europe/London', 'Europe/Berlin', 'America/New_York', 'America/Los_Angeles', 'UTC'];
 
+/** 제공자 하나의 API 열쇠(Claude·GPT 각각). 지금 대화에 쓰는 제공자에는 '사용 중' 표시. */
+function ApiKeyBox({ settings, provider, active }: { settings: SettingsDto; provider: SettingsDto['providers'][number]; active: boolean }) {
+  const toast = useApp((s) => s.toast);
+  const [key, setKey] = useState('');
+  const [pin, setPin] = useState('');
+  const [edit, setEdit] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const registered = settings.api_keys.find((k) => k.provider === provider.id);
+  const save = async () => {
+    setBusy(true);
+    try {
+      await api.put(`/settings/api-keys/${provider.id}`, { key: key.trim(), pin });
+      await refresh('settings');
+      setKey('');
+      setPin('');
+      setEdit(false);
+      toast(`${provider.label} API 키를 저장했습니다`);
+    } catch (e) {
+      fail(e);
+      setPin('');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="rounded-[10px] border p-3">
+      <div className="flex items-center gap-2">
+        <Icon name="key" className="text-accent" />
+        <span className="min-w-0 flex-1 truncate text-sm font-bold">
+          {provider.label} API 키{active && <span className="ml-1 text-xs font-normal text-sub">· 대화에 사용 중</span>}
+        </span>
+        {registered ? <Tag tone="accent">••••{registered.last4}</Tag> : <Tag tone={active ? 'danger' : undefined}>등록 전</Tag>}
+        <IconButton icon={edit ? 'close' : 'edit'} label={edit ? '닫기' : registered ? `${provider.label} API 키 변경` : `${provider.label} API 키 등록`} active={edit} onClick={() => setEdit(!edit)} />
+      </div>
+      {edit ? (
+        <div className="mt-2 space-y-2">
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="새 API 키">
+              <input className={inputClass} type="password" autoComplete="off" placeholder={provider.keyHint} value={key} onChange={(e) => setKey(e.target.value)} />
+            </Field>
+            {!LOCAL_TRACK && <PinField value={pin} onChange={setPin} />}
+          </div>
+          <ButtonRow>
+            <Button icon="close" disabled={busy} onClick={() => setEdit(false)}>
+              취소
+            </Button>
+            <Button icon="save" tone="primary" disabled={busy || key.trim().length < 20 || !pinReady(pin)} onClick={save}>
+              키 저장
+            </Button>
+          </ButtonRow>
+        </div>
+      ) : (
+        <p className="mt-1 text-xs text-sub">
+          {LOCAL_TRACK
+            ? `키는 이 브라우저에만 두고 드라이브에도 올리지 않습니다. 다른 기기에서는 다시 넣어야 합니다. AI 요청은 이 브라우저가 ${provider.label} 에 바로 보냅니다.`
+            : '키는 암호화해 서버에만 두고, 화면에는 끝 4자리만 보여 줍니다. AI 호출은 모두 서버를 거칩니다.'}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function GeneralTab({ settings }: { settings: SettingsDto }) {
   const toast = useApp((s) => s.toast);
   const [timezone, setTimezone] = useState(settings.timezone);
   const [budget, setBudget] = useState(String(settings.monthly_budget));
   const [model, setModel] = useState(settings.llm_model);
-  const [key, setKey] = useState('');
-  const [pin, setPin] = useState('');
-  const [editKey, setEditKey] = useState(false);
   const [busy, setBusy] = useState(false);
-  const registered = settings.api_keys.find((k) => k.provider === settings.llm_provider);
+  const chosen = settings.models.find((m) => m.id === model);
   const spent = settings.month_cost;
   const ratio = settings.monthly_budget > 0 ? Math.min(1, spent / settings.monthly_budget) : 1;
 
@@ -46,23 +105,6 @@ function GeneralTab({ settings }: { settings: SettingsDto }) {
       setBusy(false);
     }
   };
-  const saveKey = async () => {
-    setBusy(true);
-    try {
-      await api.put(`/settings/api-keys/${settings.llm_provider}`, { key: key.trim(), pin });
-      await refresh('settings');
-      setKey('');
-      setPin('');
-      setEditKey(false);
-      toast('API 키를 저장했습니다');
-    } catch (e) {
-      fail(e);
-      setPin('');
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-2">
@@ -80,10 +122,16 @@ function GeneralTab({ settings }: { settings: SettingsDto }) {
         </Field>
         <Field label="AI 모델">
           <select className={inputClass} value={model} onChange={(e) => setModel(e.target.value)}>
-            {settings.models.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label} · 입력 ${m.input} / 출력 ${m.output}
-              </option>
+            {settings.providers.map((p) => (
+              <optgroup key={p.id} label={p.label}>
+                {settings.models
+                  .filter((m) => m.provider === p.id)
+                  .map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label} · 입력 ${m.input} / 출력 ${m.output}
+                    </option>
+                  ))}
+              </optgroup>
             ))}
           </select>
         </Field>
@@ -93,40 +141,14 @@ function GeneralTab({ settings }: { settings: SettingsDto }) {
           </Button>
         </div>
       </div>
-      <p className="-mt-2 text-xs text-sub">모델 가격은 100만 토큰당 달러입니다. 한도의 80%에서 알리고 100%에서 AI 호출을 멈춥니다.</p>
+      <p className="-mt-2 text-xs text-sub">
+        모델 가격은 100만 토큰당 달러입니다. 한도의 80%에서 알리고 100%에서 AI 호출을 멈춥니다.
+        {chosen && !settings.api_keys.some((k) => k.provider === chosen.provider) && ` 고른 모델은 ${settings.providers.find((p) => p.id === chosen.provider)?.label ?? chosen.provider} 열쇠가 있어야 합니다(아래).`}
+      </p>
 
-      <div className="rounded-[10px] border p-3">
-        <div className="flex items-center gap-2">
-          <Icon name="key" className="text-accent" />
-          <span className="min-w-0 flex-1 truncate text-sm font-bold">Claude API 키</span>
-          {registered ? <Tag tone="accent">••••{registered.last4}</Tag> : <Tag tone="danger">등록 전</Tag>}
-          <IconButton icon={editKey ? 'close' : 'edit'} label={editKey ? '닫기' : registered ? 'API 키 변경' : 'API 키 등록'} active={editKey} onClick={() => setEditKey(!editKey)} />
-        </div>
-        {editKey ? (
-          <div className="mt-2 space-y-2">
-            <div className="grid grid-cols-2 gap-2">
-              <Field label="새 API 키">
-                <input className={inputClass} type="password" autoComplete="off" placeholder="sk-ant-…" value={key} onChange={(e) => setKey(e.target.value)} />
-              </Field>
-              {!LOCAL_TRACK && <PinField value={pin} onChange={setPin} />}
-            </div>
-            <ButtonRow>
-              <Button icon="close" disabled={busy} onClick={() => setEditKey(false)}>
-                취소
-              </Button>
-              <Button icon="save" tone="primary" disabled={busy || key.trim().length < 20 || !pinReady(pin)} onClick={saveKey}>
-                키 저장
-              </Button>
-            </ButtonRow>
-          </div>
-        ) : (
-          <p className="mt-1 text-xs text-sub">
-            {LOCAL_TRACK
-              ? '키는 이 브라우저에만 두고 드라이브에도 올리지 않습니다. 다른 기기에서는 다시 넣어야 합니다. AI 요청은 이 브라우저가 Claude 에 바로 보냅니다.'
-              : '키는 암호화해 서버에만 두고, 화면에는 끝 4자리만 보여 줍니다. AI 호출은 모두 서버를 거칩니다.'}
-          </p>
-        )}
-      </div>
+      {settings.providers.map((p) => (
+        <ApiKeyBox key={p.id} settings={settings} provider={p} active={settings.llm_provider === p.id} />
+      ))}
 
       <div className="rounded-[10px] border p-3">
         <div className="flex items-center justify-between gap-2">
@@ -494,7 +516,7 @@ function DataTab() {
     <div className="space-y-4">
       <div className="rounded-[10px] border p-3">
         <span className="text-sm font-bold">내보내기</span>
-        <p className="mt-1 text-xs text-sub">보드 전체(블록·할 일·일정·표·메모·알림·AI 대화)를 파일 하나로 받습니다. Claude 열쇠·로그인 정보는 담지 않습니다. 구글 드라이브 트랙에서도 그대로 가져올 수 있습니다.</p>
+        <p className="mt-1 text-xs text-sub">보드 전체(블록·할 일·일정·표·메모·알림·AI 대화)를 파일 하나로 받습니다. AI(Claude·GPT) 열쇠·로그인 정보는 담지 않습니다. 구글 드라이브 트랙에서도 그대로 가져올 수 있습니다.</p>
         <ButtonRow>
           <Button icon="archive" disabled={busy} onClick={download}>
             파일로 받기

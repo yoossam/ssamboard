@@ -30,7 +30,7 @@ async function google(route) {
   await ctx.route('https://sheets.googleapis.com/**', google);
   const p = await ctx.newPage(); const errs = [];
   p.on('pageerror', (e) => errs.push(e.message)); p.on('console', (m) => m.type() === 'error' && errs.push(m.text().slice(0, 200)));
-  await p.goto('http://127.0.0.1:4321/ssamboard/', { waitUntil: 'networkidle' });
+  await p.goto('http://127.0.0.1:4321/ssamboard/app/', { waitUntil: 'networkidle' });
   await p.getByRole('button', { name: '구글 계정으로 시작' }).click();
   await p.waitForSelector('.react-grid-item', { timeout: 60000 });
   const openSettings = async (tab) => { await p.locator('header button').first().click(); await p.getByText('설정', { exact: true }).first().click(); await p.getByRole('tab', { name: tab }).click(); };

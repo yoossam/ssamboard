@@ -21,7 +21,8 @@
     "migrate": "npm run migrate -w @jarvis/api",
     "reset-pin": "npm run reset-pin -w @jarvis/api --",
     "typecheck": "npm run typecheck -w @jarvis/api && npm run typecheck -w @jarvis/web && npm run typecheck -w @jarvis/local",
-    "build:local": "npm run build -w @jarvis/shared && npm run build:local -w @jarvis/web"
+    "build:local": "npm run build -w @jarvis/shared && npm run build:local -w @jarvis/web",
+    "build:pages": "npm run build:local && node scripts/build-pages.mjs"
   },
   "devDependencies": {
     "tsx": "^4.19.2",

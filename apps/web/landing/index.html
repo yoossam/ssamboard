@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>쌤보드 — 선생님의 한 페이지 업무 보드</title>
+<meta name="description" content="할 일·일정·표·메모를 한 화면에, 말로 시키면 AI 가 정리·수합·시각화. 구글 드라이브 간편판과 서버 설치판 중 골라 쓰세요." />
+<meta name="theme-color" content="#F0F0E0" />
+<link rel="icon" href="./app/icon.svg" type="image/svg+xml" />
+<!--
+  공개 주소 첫 화면(두 트랙 고르기). scripts/build-pages.mjs 가 __REPO_URL__ 을 공개 저장소 주소로 바꿔 Pages 맨 위에 둔다.
+  간편판 앱은 ./app/, 사용 안내 ./guide.html, 개인정보 처리방침 ./privacy.html.
+-->
+<style>
+  :root { --ground: #f0f0e0; --card: #fbfbf4; --ink: #2b3214; --sub: #5d6640; --accent: #3e481d; --line: #d9dbc2; --tint: #e3e6c8; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--ground); color: var(--ink); font: 16px/1.7 system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; }
+  main { max-width: 960px; margin: 0 auto; padding: 48px 20px 64px; }
+  header { text-align: center; margin-bottom: 36px; }
+  .mark { width: 64px; height: 64px; border-radius: 999px; background: var(--tint); display: inline-flex; align-items: center; justify-content: center; font-size: 28px; color: var(--accent); }
+  h1 { font-size: 2rem; margin: 14px 0 6px; }
+  .lead { color: var(--sub); margin: 0 auto; max-width: 560px; }
+  .motto { margin-top: 10px; font-weight: 600; color: var(--accent); }
+  .tracks { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .track { background: var(--card); border: 1px solid var(--line); border-radius: 24px; padding: 28px 24px; display: flex; flex-direction: column; }
+  .track h2 { margin: 0 0 4px; font-size: 1.25rem; }
+  .track .who { color: var(--sub); font-size: .92rem; margin: 0 0 12px; }
+  .track ul { padding-left: 1.2em; margin: 0 0 18px; flex: 1; }
+  .track li { margin: 4px 0; font-size: .95rem; }
+  .btn { display: block; text-align: center; padding: 12px 16px; border-radius: 999px; font-weight: 600; text-decoration: none; transition: transform .125s cubic-bezier(.24,1,.4,1); }
+  .btn:active { transform: scale(.98); }
+  .primary { background: var(--accent); color: #f0f0e0; }
+  .secondary { border: 1px solid var(--accent); color: var(--accent); }
+  .tag { align-self: flex-start; display: inline-block; font-size: .78rem; padding: 0 10px; border-radius: 999px; background: var(--tint); color: var(--accent); margin-bottom: 10px; }
+  section.more { margin-top: 36px; background: var(--card); border: 1px solid var(--line); border-radius: 24px; padding: 24px; }
+  table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+  th, td { border-bottom: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { color: var(--sub); font-weight: 600; }
+  footer { margin-top: 28px; text-align: center; font-size: .88rem; color: var(--sub); }
+  footer a, .more a { color: var(--accent); }
+  #resume { display: none; margin: 0 auto 24px; max-width: 420px; }
+  @media (max-width: 720px) { .tracks { grid-template-columns: 1fr; } h1 { font-size: 1.6rem; } }
+</style>
+</head>
+<body>
+<main>
+<header>
+  <div class="mark" aria-hidden="true">✦</div>
+  <h1>쌤보드</h1>
+  <p class="lead">할 일·일정·표·메모를 한 화면에 모아 두고, 말로 시키면 AI(Claude·GPT)가 정리하고 수합하고 그림으로 보여 주는 선생님의 업무 보드</p>
+  <p class="motto">쉽게 일하고, 쉽게 전달하고, 쉽게 수합하고, 모든 일은 AI 를 시키자.</p>
+</header>
+
+<a id="resume" class="btn primary" href="./app/">내 보드 이어서 열기</a>
+
+<div class="tracks">
+  <div class="track">
+    <span class="tag">설치 없음 · 무료</span>
+    <h2>구글 드라이브 간편판</h2>
+    <p class="who">이 주소에서 바로 시작하고 싶은 분</p>
+    <ul>
+      <li>구글 계정으로 로그인하면 끝 — 설치할 것이 없습니다.</li>
+      <li>자료는 <b>내 구글 드라이브의 숨은 앱 폴더</b>에 저장되고, 하루 한 번 백업합니다.</li>
+      <li>같은 계정이면 컴퓨터·휴대폰 어디서나 같은 보드. 인터넷이 끊겨도 열립니다.</li>
+      <li>앱을 닫아 둔 동안 저절로 하는 일(일정 알림·시트 자동 맞춤)은 없습니다.</li>
+    </ul>
+    <a class="btn primary" href="./app/">간편판 시작하기</a>
+  </div>
+  <div class="track">
+    <span class="tag">내 서버 · 모든 기능</span>
+    <h2>서버 설치판</h2>
+    <p class="who">학교·집 컴퓨터에 직접 설치해 늘 켜 두고 쓰실 분</p>
+    <ul>
+      <li>Docker 가 있는 컴퓨터에서 저장소를 받아 설치 명령 한 번(약 10분).</li>
+      <li>자료는 <b>내 서버의 데이터베이스</b>에 — PIN 잠금, 여러 기기 관리.</li>
+      <li>일정 10분 전 알림, 시트·설문 자동 다시 읽기, 웹훅까지 모두 됩니다.</li>
+      <li>저장소를 <b>포크</b>하면 내 것으로 가져가 고쳐 쓸 수 있습니다(MIT).</li>
+    </ul>
+    <a class="btn secondary" href="__REPO_URL__#서버-트랙">설치 안내 보기 (GitHub)</a>
+  </div>
+</div>
+
+<section class="more">
+  <table>
+    <tr><th></th><th>간편판</th><th>서버 설치판</th></tr>
+    <tr><td>시작</td><td>주소 열고 구글 로그인</td><td>Docker 설치 후 명령 한 번</td></tr>
+    <tr><td>자료 위치</td><td>내 브라우저 + 내 구글 드라이브</td><td>내 서버</td></tr>
+    <tr><td>AI</td><td colspan="2">Claude 또는 GPT — 내 API 열쇠로(열쇠가 없어도 보드는 씀)</td></tr>
+    <tr><td>보드·표·AI 화면·시트·설문</td><td>됨</td><td>됨</td></tr>
+    <tr><td>앱을 닫아도 도는 일</td><td>없음</td><td>알림·자동 동기화·웹훅</td></tr>
+    <tr><td>옮기기</td><td colspan="2">설정에서 내보내기·가져오기로 두 판 사이를 오갈 수 있습니다</td></tr>
+  </table>
+  <p style="margin:14px 0 0;font-size:.92rem">두 판은 같은 코드라 기능이 함께 늘어납니다. 자세한 쓰는 법은 <a href="./guide.html">사용 안내</a>에 있습니다.</p>
+</section>
+
+<footer>
+  <a href="./guide.html">사용 안내</a> · <a href="./privacy.html">개인정보 처리방침</a> · <a href="__REPO_URL__">소스 코드(GitHub)</a> · <a href="__REPO_URL__/issues">문의</a>
+</footer>
+</main>
+<script>
+  // 이미 쓰던 사람은 바로 이어 열 수 있게(앱이 이 브라우저에 고른 트랙을 기억한다 — apps/local/src/index.ts TRACK_KEY)
+  try { if (localStorage.getItem('ssamboard.track')) document.getElementById('resume').style.display = 'block'; } catch (e) {}
+  // 예전엔 앱이 맨 위 주소에 있었다 — 그때 등록된 서비스 워커(맨 위 범위)를 내려 새 첫 화면이 바로 보이게 한다.
+  if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistrations().then(function (rs) {
+    rs.forEach(function (r) { var s = new URL(r.scope).pathname; if (!/\/app\/$/.test(s)) r.unregister(); });
+  }).catch(function () {});
+</script>
+</body>
+</html>

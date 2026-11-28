@@ -3,6 +3,7 @@ const pw = require(process.argv[2]); const S = process.argv[3];
 const files = new Map(); let seq = 0; let calls = [];
 // 가짜 열쇠(진짜 열쇠 모양 검사에 걸리지 않게 이어 붙인다)
 const FAKE_KEY = 'sk-ant-' + 'test-' + 'x'.repeat(24);
+const FAKE_GPT_KEY = 'sk-' + 'gpt-test-' + 'y'.repeat(24);
 const GIS = `window.google={accounts:{oauth2:{initTokenClient:(c)=>({requestAccessToken:()=>setTimeout(()=>c.callback({access_token:'tok-'+Date.now(),expires_in:3600,scope:'https://www.googleapis.com/auth/drive.appdata openid email profile'}),50)}),revoke:(t,d)=>d&&d()}}};`;
 async function google(route) {
   const req = route.request(); const url = new URL(req.url()); const m = req.method();
@@ -35,7 +36,7 @@ async function device(b, name) {
   const b = await pw.chromium.launch(); const out = {};
   // 기기 A
   const A = await device(b, 'A');
-  await A.p.goto('http://127.0.0.1:4321/ssamboard/', { waitUntil: 'networkidle' });
+  await A.p.goto('http://127.0.0.1:4321/ssamboard/app/', { waitUntil: 'networkidle' });
   await A.p.getByRole('button', { name: '구글 계정으로 시작' }).click();
   await A.p.waitForSelector('.react-grid-item', { timeout: 60000 });
   // 할 일 추가: 할 일 블록의 '추가' → 입력
@@ -61,21 +62,26 @@ async function device(b, name) {
   await A.p.screenshot({ path: S + '/dt-drivetab.png' });
   // 일반 탭: PIN 없이 열쇠 넣기
   await A.p.getByRole('tab', { name: '일반' }).click().catch(async () => A.p.getByRole('button', { name: '일반' }).click());
-  await A.p.getByRole('button', { name: /API 키 등록/ }).click();
+  // Claude·GPT 열쇠를 모두 넣는다(둘 다 드라이브에 올라가면 안 된다)
+  await A.p.getByRole('button', { name: 'Claude API 키 등록' }).click();
   await A.p.getByPlaceholder('sk-ant-…').fill(FAKE_KEY);
   await A.p.getByRole('button', { name: '키 저장' }).click();
   await A.p.waitForTimeout(600);
-  out.keyTag = await A.p.getByText(/••••/).first().innerText().catch(() => 'none');
+  await A.p.getByRole('button', { name: 'GPT(OpenAI) API 키 등록' }).click();
+  await A.p.getByPlaceholder('sk-…', { exact: true }).fill(FAKE_GPT_KEY);
+  await A.p.getByRole('button', { name: '키 저장' }).click();
+  await A.p.waitForTimeout(600);
+  out.keyTag = await A.p.getByText(/••••/).allInnerTexts().catch(() => 'none');
   await A.p.getByRole('tab', { name: '드라이브' }).click().catch(async () => A.p.getByRole('button', { name: '드라이브' }).click());
   await A.p.getByRole('button', { name: '지금 저장' }).click();
   await A.p.waitForTimeout(800);
   const data = JSON.parse([...files.values()].find((f) => f.name === 'ssamboard-data.json').body);
   out.driveTasks = data.tables.tasks.map((t) => t.title);
-  out.keyInDrive = JSON.stringify(data).includes('sk-ant-test');
+  out.keyInDrive = JSON.stringify(data).includes('sk-ant-test') || JSON.stringify(data).includes('gpt-test');
   await A.ctx.close();
   // 기기 B: 새 브라우저
   const B = await device(b, 'B');
-  await B.p.goto('http://127.0.0.1:4321/ssamboard/', { waitUntil: 'networkidle' });
+  await B.p.goto('http://127.0.0.1:4321/ssamboard/app/', { waitUntil: 'networkidle' });
   await B.p.getByRole('button', { name: '구글 계정으로 시작' }).click();
   await B.p.waitForSelector('.react-grid-item', { timeout: 60000 });
   await B.p.waitForTimeout(800);

@@ -53,7 +53,7 @@ export function DriveTab() {
         </div>
         <p className="mt-1 text-xs text-sub">
           {drive
-            ? `${h.identity.email} 의 구글 드라이브 숨은 앱 폴더에 저장합니다. 바뀐 뒤 10초 조용하면 올리고, 하루 한 번 백업을 남깁니다(14개까지). Claude 열쇠는 올리지 않습니다.`
+            ? `${h.identity.email} 의 구글 드라이브 숨은 앱 폴더에 저장합니다. 바뀐 뒤 10초 조용하면 올리고, 하루 한 번 백업을 남깁니다(14개까지). AI(Claude·GPT) 열쇠는 올리지 않습니다.`
             : '이 브라우저에만 있습니다. 브라우저 기록을 지우거나 다른 기기에서는 볼 수 없습니다.'}
         </p>
         <ButtonRow>
@@ -102,7 +102,7 @@ export function DriveTab() {
 
       <div className="rounded-[10px] border p-3">
         <span className="text-sm font-bold">파일로 옮기기</span>
-        <p className="mt-1 text-xs text-sub">보드 전체를 파일 하나로 받아 두거나, 받아 둔 파일로 이 보드를 바꿉니다(Claude 열쇠는 담지 않습니다).</p>
+        <p className="mt-1 text-xs text-sub">보드 전체를 파일 하나로 받아 두거나, 받아 둔 파일로 이 보드를 바꿉니다(AI 열쇠는 담지 않습니다).</p>
         <ButtonRow>
           <Button icon="archive" disabled={busy} onClick={() => void run(download)}>
             내보내기

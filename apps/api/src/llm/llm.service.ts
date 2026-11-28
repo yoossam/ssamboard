@@ -7,6 +7,7 @@ import { Db } from '../db/db.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import type { LlmAdapter, LlmUsage } from './adapter';
 import { AnthropicAdapter } from './anthropic.adapter';
+import { OpenAiAdapter } from './openai.adapter';
 import { costUsd } from './pricing';
 
 export interface LlmContext {
@@ -18,7 +19,10 @@ export interface LlmContext {
 /** API 키 보관, 비용 한도(USR-5), 사용량 기록(LLM-9)을 맡는다. LLM 호출은 반드시 서버를 거친다. */
 @Injectable()
 export class LlmService {
-  private readonly adapters = new Map<string, LlmAdapter>([['anthropic', new AnthropicAdapter()]]);
+  private readonly adapters = new Map<string, LlmAdapter>([
+    ['anthropic', new AnthropicAdapter()],
+    ['openai', new OpenAiAdapter()],
+  ]);
 
   constructor(
     private readonly db: Db,

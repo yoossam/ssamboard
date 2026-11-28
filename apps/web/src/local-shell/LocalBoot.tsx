@@ -149,7 +149,7 @@ export function LocalBoot({ children }: { children: ReactNode }) {
       </div>
       <ul className="mt-5 space-y-1 text-xs text-sub">
         <li>· 쌤보드를 만든 사람을 포함해 누구도 여러분의 보드를 볼 수 없습니다. 서버가 없고, 자료는 이 브라우저와 내 드라이브에만 있습니다.</li>
-        <li>· AI 를 쓰려면 Claude API 열쇠가 필요합니다(설정 → 일반). 열쇠는 이 브라우저에만 두고, AI 요청은 브라우저가 Claude 에 바로 보냅니다.</li>
+        <li>· AI 를 쓰려면 Claude 또는 GPT(OpenAI) API 열쇠가 필요합니다(설정 → 일반). 열쇠는 이 브라우저에만 두고, AI 요청은 브라우저가 Claude·OpenAI 에 바로 보냅니다.</li>
         {SERVER_TRACK_URL && (
           <li>
             · 학교 서버에 직접 설치해 쓰려면{' '}

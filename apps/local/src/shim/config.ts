@@ -16,6 +16,7 @@ export const config = {
   uploadDir: 'mem/uploads',
   webDist: '',
   anthropicBaseUrl: 'https://api.anthropic.com',
+  openaiBaseUrl: 'https://api.openai.com',
   /** 브라우저가 Claude 를 바로 부른다(anthropic-dangerous-direct-browser-access). */
   anthropicBrowserAccess: true,
   workerEnabled: false,

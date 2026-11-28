@@ -10,7 +10,7 @@ import { Audit } from './common/audit.service';
 import { bad, notFound, obj, oneOf, str, uuid } from './common/http';
 import { Db } from './db/db.service';
 import { LlmService } from './llm/llm.service';
-import { MODELS } from './llm/pricing';
+import { MODELS, PROVIDERS } from './llm/pricing';
 import { NotificationsService } from './notifications/notifications.service';
 import { UploadsService, type UploadPreview, type UploadSuggestion } from './uploads/uploads.service';
 
@@ -68,7 +68,8 @@ export class SettingsController {
       llm_provider: u.llm_provider,
       llm_model: u.llm_model,
       lock_minutes: u.lock_minutes,
-      models: MODELS.filter((m) => m.provider === u.llm_provider).map(({ id, label, input, output }) => ({ id, label, input, output })),
+      models: MODELS.map(({ id, provider, label, input, output }) => ({ id, provider, label, input, output })),
+      providers: PROVIDERS,
       api_keys: await this.llm.keys(u.id),
       month_cost: await this.llm.monthCost(u),
       usage: await this.llm.usage(u),
@@ -78,7 +79,7 @@ export class SettingsController {
   /** 일반 설정: 시간대·비용 한도·모델(USR-6). */
   @Put()
   async update(@Auth() ctx: AuthCtx, @Body() body: any): Promise<{ ok: true }> {
-    const patch: { timezone?: string; monthly_budget?: number; llm_model?: string } = {};
+    const patch: { timezone?: string; monthly_budget?: number; llm_model?: string; llm_provider?: string } = {};
     if (body?.timezone !== undefined) {
       const tz = str(body.timezone, '시간대', { max: 60 });
       try {
@@ -94,15 +95,16 @@ export class SettingsController {
       patch.monthly_budget = Math.round(n * 100) / 100;
     }
     if (body?.llm_model !== undefined) {
-      if (!MODELS.some((m) => m.id === body.llm_model && m.provider === ctx.user.llm_provider)) bad('고를 수 없는 모델입니다.');
-      patch.llm_model = body.llm_model;
+      // 모델을 고르면 제공자(Claude·GPT)도 그 모델 것으로 바뀐다.
+      const m = MODELS.find((x) => x.id === body.llm_model);
+      if (!m) bad('고를 수 없는 모델입니다.');
+      patch.llm_model = m!.id;
+      patch.llm_provider = m!.provider;
     }
-    await this.db.query('update users set timezone = coalesce($2, timezone), monthly_budget = coalesce($3, monthly_budget), llm_model = coalesce($4, llm_model) where id = $1', [
-      ctx.user.id,
-      patch.timezone ?? null,
-      patch.monthly_budget ?? null,
-      patch.llm_model ?? null,
-    ]);
+    await this.db.query(
+      'update users set timezone = coalesce($2, timezone), monthly_budget = coalesce($3, monthly_budget), llm_model = coalesce($4, llm_model), llm_provider = coalesce($5, llm_provider) where id = $1',
+      [ctx.user.id, patch.timezone ?? null, patch.monthly_budget ?? null, patch.llm_model ?? null, patch.llm_provider ?? null],
+    );
     return { ok: true };
   }
 

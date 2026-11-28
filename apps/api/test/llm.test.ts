@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { AnthropicAdapter, sseEvents, StreamAccumulator } from '../src/llm/anthropic.adapter';
 import { costUsd } from '../src/llm/pricing';
+import { OpenAiAdapter, ResponsesAccumulator, toInput } from '../src/llm/openai.adapter';
 
 // 문서(build-with-claude/streaming)의 예시 스트림을 줄여 쓴 것이다.
 const TOOL_STREAM = [
@@ -87,5 +88,84 @@ describe('Claude 스트림 해석', () => {
     assert.equal(costUsd('claude-sonnet-5-5', { input_tokens: 1_000_000, output_tokens: 100_000 }), 3);
     assert.equal(costUsd('claude-opus-5-5', { input_tokens: 500_000, output_tokens: 0 }), 2);
     assert.equal(costUsd('unknown-model', { input_tokens: 1000, output_tokens: 1000 }), 0);
+  });
+});
+
+// GPT(OpenAI Responses API) — 문서의 이벤트 이름으로 만든 스트림
+const GPT_STREAM = [
+  'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_1","status":"in_progress","output":[]}}',
+  'event: response.output_item.added\ndata: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[]}}',
+  'event: response.output_item.done\ndata: {"type":"response.output_item.done","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[],"encrypted_content":"gAAA"}}',
+  'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","output_index":1,"content_index":0,"delta":"날씨를"}',
+  'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","output_index":1,"content_index":0,"delta":" 볼게요."}',
+  'event: response.function_call_arguments.delta\ndata: {"type":"response.function_call_arguments.delta","output_index":2,"delta":"{\\"location\\":"}',
+  'event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp_1","status":"completed","usage":{"input_tokens":300,"output_tokens":40},"output":[{"id":"rs_1","type":"reasoning","summary":[],"encrypted_content":"gAAA"},{"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"날씨를 볼게요.","annotations":[]}]},{"id":"fc_1","type":"function_call","call_id":"call_9","name":"get_weather","arguments":"{\\"location\\":\\"서울\\"}","status":"completed"}]}}',
+].join('\n\n');
+
+describe('GPT(Responses API) 연결', () => {
+  it('글자·도구 호출·사용량을 모은다', async () => {
+    for (const size of [5, 100_000]) {
+      const acc = new ResponsesAccumulator();
+      const seen: string[] = [];
+      for await (const event of sseEvents(chunks(GPT_STREAM, size))) acc.push(event, (d) => seen.push(d));
+      const turn = acc.result();
+      assert.deepEqual(seen, ['날씨를', ' 볼게요.']);
+      assert.equal(turn.text, '날씨를 볼게요.');
+      assert.deepEqual(turn.toolCalls, [{ id: 'call_9', name: 'get_weather', input: { location: '서울' } }]);
+      assert.equal(turn.stopReason, 'tool_use');
+      assert.deepEqual(turn.usage, { input_tokens: 300, output_tokens: 40 });
+      assert.equal(turn.content.length, 3);
+    }
+  });
+  it('다음 요청 입력: 추론 항목은 그대로, 나머지는 id 를 떼고, 도구 결과·이미지·PDF 는 Responses 모양으로', async () => {
+    const acc = new ResponsesAccumulator();
+    for await (const event of sseEvents(chunks(GPT_STREAM, 64))) acc.push(event);
+    const turn = acc.result();
+    const input = toInput([
+      { role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAA' } }, { type: 'document', title: 'a.pdf', source: { type: 'base64', media_type: 'application/pdf', data: 'BBB' } }, { type: 'text', text: '봐 줘' }] },
+      { role: 'assistant', content: turn.content },
+      new OpenAiAdapter().toolResults([{ id: 'call_9', content: '{"temp":3}' }, { id: 'call_8', content: '없음', isError: true }]),
+      { role: 'assistant', content: '옛 답' },
+    ]);
+    assert.deepEqual(input[0], { role: 'user', content: [{ type: 'input_image', image_url: 'data:image/png;base64,AAA' }, { type: 'input_file', filename: 'a.pdf', file_data: 'data:application/pdf;base64,BBB' }, { type: 'input_text', text: '봐 줘' }] });
+    assert.deepEqual(input[1], { id: 'rs_1', type: 'reasoning', summary: [], encrypted_content: 'gAAA' });
+    assert.equal(input[2].id, undefined);
+    assert.equal(input[2].type, 'message');
+    assert.deepEqual(input[3], { type: 'function_call', call_id: 'call_9', name: 'get_weather', arguments: '{"location":"서울"}', status: 'completed' });
+    assert.deepEqual(input[4], { type: 'function_call_output', call_id: 'call_9', output: '{"temp":3}' });
+    assert.deepEqual(input[5], { type: 'function_call_output', call_id: 'call_8', output: '오류: 없음' });
+    assert.deepEqual(input[6], { role: 'assistant', content: '옛 답' });
+  });
+  it('도구 없이 끝나면 end_turn, 실패 이벤트는 예외', () => {
+    const acc = new ResponsesAccumulator();
+    acc.push({ type: 'response.completed', response: { status: 'completed', usage: { input_tokens: 1, output_tokens: 2 }, output: [{ type: 'message', content: [{ type: 'output_text', text: '네' }] }] } });
+    assert.equal(acc.result().stopReason, 'end_turn');
+    assert.equal(acc.result().text, '네');
+    assert.throws(() => new ResponsesAccumulator().push({ type: 'response.failed', response: { error: { message: 'boom' } } }), /GPT 요청이 실패/);
+  });
+  it('요청 모양: 도구·지시문·store false, 키는 Bearer', async () => {
+    const seen: any[] = [];
+    const orig = globalThis.fetch;
+    globalThis.fetch = (async (url: string, init: any) => {
+      seen.push({ url, init });
+      return new Response(GPT_STREAM + '\n\n', { status: 200 });
+    }) as typeof fetch;
+    try {
+      const turn = await new OpenAiAdapter().stream({ apiKey: 'sk-test', model: 'gpt-6.2-sol', system: '지시', messages: [{ role: 'user', content: '안녕' }], tools: [{ name: 'get_weather', description: 'd', input_schema: { type: 'object', properties: {} } }] });
+      assert.equal(turn.toolCalls[0].name, 'get_weather');
+    } finally {
+      globalThis.fetch = orig;
+    }
+    const body = JSON.parse(seen[0].init.body);
+    assert.match(seen[0].url, /\/v1\/responses$/);
+    assert.equal(seen[0].init.headers.authorization, 'Bearer sk-test');
+    assert.equal(body.instructions, '지시');
+    assert.equal(body.store, false);
+    assert.deepEqual(body.include, ['reasoning.encrypted_content']);
+    assert.deepEqual(body.tools[0], { type: 'function', name: 'get_weather', description: 'd', parameters: { type: 'object', properties: {} }, strict: false });
+    assert.deepEqual(body.input, [{ role: 'user', content: '안녕' }]);
+  });
+  it('GPT 모델 값도 비용에 들어간다', () => {
+    assert.equal(costUsd('gpt-6.2-sol', { input_tokens: 1_000_000, output_tokens: 100_000 }), 3);
   });
 });

@@ -1,4 +1,4 @@
-// 제공자 어댑터 인터페이스(LLM-10). MVP는 Claude 어댑터 1개만 구현한다.
+// 제공자 어댑터 인터페이스(LLM-10). Claude(anthropic.adapter)와 GPT(openai.adapter, 2026-11-28).
 // 대화·표·블록은 이 형식과 무관하게 저장하므로, 제공자를 더해도 데이터는 그대로 쓴다.
 
 export interface LlmTool {

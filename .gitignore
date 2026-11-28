@@ -6,4 +6,5 @@ dist/
 *.log
 .DS_Store
 apps/web/dist-local
+apps/web/dist-pages
 apps/local/test/.*.bundle.mjs

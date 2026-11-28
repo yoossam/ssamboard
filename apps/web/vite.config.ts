@@ -17,8 +17,8 @@ const LOCAL_CSP = [
   "default-src 'self'",
   // 구글 로그인 도구, 시트 고르기 창(apis.google.com)
   "script-src 'self' 'wasm-unsafe-eval' https://accounts.google.com/gsi/client https://apis.google.com",
-  // Claude, 구글 드라이브·시트·설문 API
-  "connect-src 'self' https://api.anthropic.com https://www.googleapis.com https://sheets.googleapis.com https://forms.googleapis.com https://accounts.google.com",
+  // Claude·GPT, 구글 드라이브·시트·설문 API
+  "connect-src 'self' https://api.anthropic.com https://api.openai.com https://www.googleapis.com https://sheets.googleapis.com https://forms.googleapis.com https://accounts.google.com",
   'frame-src https://accounts.google.com https://docs.google.com https://content.googleapis.com',
   "img-src 'self' data: blob: https://*.googleusercontent.com https://ssl.gstatic.com https://www.gstatic.com",
   "style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style",

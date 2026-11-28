@@ -230,7 +230,8 @@ export interface SettingsDto {
   llm_provider: string;
   llm_model: string;
   lock_minutes: number;
-  models: { id: string; label: string; input: number; output: number }[];
+  models: { id: string; provider: string; label: string; input: number; output: number }[];
+  providers: { id: string; label: string; keyHint: string }[];
   api_keys: { provider: string; last4: string }[];
   /** 이번 달(사용자 시간대)의 예상 비용 */
   month_cost: number;

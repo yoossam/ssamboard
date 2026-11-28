@@ -4,7 +4,7 @@ const pw = require(process.argv[2]);
   const ctx = await b.newContext();
   const p = await ctx.newPage(); const errs = [];
   p.on('pageerror', (e) => errs.push(e.message));
-  await p.goto('http://127.0.0.1:4321/ssamboard/', { waitUntil: 'networkidle' });
+  await p.goto('http://127.0.0.1:4321/ssamboard/app/', { waitUntil: 'networkidle' });
   await p.getByRole('button', { name: '이 기기에서 시작' }).click();
   await p.waitForSelector('.react-grid-item', { timeout: 60000 });
   await p.evaluate(() => navigator.serviceWorker.ready);

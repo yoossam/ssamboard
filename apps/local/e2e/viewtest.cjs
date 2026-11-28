@@ -8,7 +8,7 @@ const pw = require(process.argv[2]); const S = process.argv[3];
   await ctx.route('https://www.googleapis.com/**', (r) => { reached.push(r.request().url()); r.fulfill({ status: 200, body: 'ok', headers: { 'access-control-allow-origin': '*' } }); });
   await ctx.route('https://evil.example/**', (r) => { reached.push(r.request().url()); r.fulfill({ status: 200, body: 'ok', headers: { 'access-control-allow-origin': '*' } }); });
   ctx.on('request', (r) => { if (!r.url().startsWith('http://127.0.0.1')) reqs.push(r.url()); });
-  await p.goto('http://127.0.0.1:4321/ssamboard/', { waitUntil: 'networkidle' });
+  await p.goto('http://127.0.0.1:4321/ssamboard/app/', { waitUntil: 'networkidle' });
   await p.getByRole('button', { name: '이 기기에서 시작' }).click();
   await p.waitForSelector('.react-grid-item', { timeout: 60000 });
   await p.locator('header button').first().click();
