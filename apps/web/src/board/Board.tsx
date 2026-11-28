@@ -1,3 +1,4 @@
+import { QuickAddButton } from './quickadd';
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import GridLayout from 'react-grid-layout';
 import {
@@ -182,6 +183,8 @@ function TopBar() {
         {!phone && <span className="min-w-0 shrink-0 truncate text-xs text-sub">{dateLabel(new Date())}</span>}
         {/* 내 메뉴(위쪽 바로가기) — 휴대폰은 아래 한 줄 */}
         {phone ? <span className="flex-1" /> : <MenuBar />}
+        {/* 블록 바로 넣기(2026-11-28 선생님 "자주 쓰는 블록은 바로") */}
+        <QuickAddButton compact={phone} />
         {/* 도움말: 지금 보드에서 할 수 있는 일(2026-11-28 선생님 "직관적으로 도움말이라고") */}
         <button
           type="button"

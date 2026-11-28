@@ -1,3 +1,4 @@
+import { addBlockOfType } from '../board/quickadd';
 import { trackUse } from '../lib/usage';
 import { MenuDrawer } from '../menu/menu';
 import { AbilitiesPanel } from './Abilities';
@@ -159,31 +160,12 @@ function MorePanel() {
 function AddBlockPanel() {
   const { close, replace, toast } = useApp.getState();
   const [busy, setBusy] = useState(false);
+  // 넣는 일은 위쪽 [+ 블록]과 같은 길(board/quickadd.tsx) — 자주 넣은 순도 함께 센다
   const add = async (type: BlockType) => {
-    if (type === 'table') return replace({ kind: 'tables' });
-    // AI 화면은 AI가 그려 주는 블록이다. AI 창을 열어 무엇을 보여 줄지 말하게 한다.
-    // 퀴즈는 AI 가 문제를 내 준다(수업 보드)
-    if (type === 'quiz') {
-      close();
-      useApp.getState().openAi();
-      return toast('어떤 퀴즈를 낼지 말해 주세요. 예: 분수의 덧셈 퀴즈 5문제 만들어');
-    }
-    if (type === 'view') {
-      close();
-      useApp.getState().openAi();
-      return toast('무엇을 보여 줄지 말해 주세요. 예: 할 일을 마감 날짜별 막대그래프로');
-    }
     setBusy(true);
-    try {
-      await api.post('/blocks', { type });
-      await refresh('board');
-      toast(`${BLOCK_LABEL[type]} 블록을 놓았습니다`);
-      close();
-    } catch (e) {
-      fail(e);
-    } finally {
-      setBusy(false);
-    }
+    close();
+    await addBlockOfType(type);
+    setBusy(false);
   };
   return (
     <Sheet title="블록 추가" icon="plus" onClose={close} width={440}>
