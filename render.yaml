@@ -1,0 +1,30 @@
+# Render 한 번에 설치(2026-11-28): 첫 화면·설치 안내의 [Render 로 설치] 단추가 이 파일을 읽어 웹 서버 + Postgres 를 만든다.
+#   단추 주소: https://render.com/deploy?repo=<이 저장소 주소>
+#   - MASTER_KEY·SETUP_CODE 는 Render 가 무작위로 만든다(256비트 base64 — MASTER_KEY 가 바라는 32바이트 꼴).
+#   - 서비스 주소(https://○○.onrender.com)는 Render 가 RENDER_EXTERNAL_URL 로 알려 주고, 서버 설정이 그것을 PUBLIC_URL 로 쓴다.
+#   - 단추로 만든 서버마다 이 저장소에 푸시할 때마다 다시 배포되지 않게 autoDeploy: false(Render 권장).
+#   무료 요금제는 시험용이다: 웹은 15분 쉬면 잠들고(첫 접속이 느림·잠든 동안 알림 일꾼도 쉼), 무료 DB 는 만든 뒤 30일이 지나면 없어진다.
+#   계속 쓰려면 Render 대시보드에서 웹·DB 를 유료 요금제로 올린다(설치 안내 참고).
+services:
+  - type: web
+    name: ssamboard
+    runtime: docker
+    plan: free
+    autoDeploy: false
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ssamboard-db
+          property: connectionString
+      - key: MASTER_KEY
+        generateValue: true
+      - key: SETUP_CODE
+        generateValue: true
+      - key: LOGIN_MODE
+        value: password
+
+databases:
+  - name: ssamboard-db
+    plan: free
+    postgresMajorVersion: '16'

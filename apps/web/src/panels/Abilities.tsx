@@ -86,6 +86,12 @@ const CLASS: Group[] = [
   {
     title: '수업 자료',
     items: [
+      {
+        icon: 'table',
+        title: '학급 시간표',
+        desc: '시간표는 수업 보드의 표 블록에서 보고 고칩니다. 내 메뉴 [시간표 편성]으로 바로 열고, AI 에게 "내일 시간표 알려 줘"처럼 물어도 됩니다.',
+        panel: { kind: 'tables' },
+      },
       { icon: 'link', title: '수업 자료 블록', desc: '캔바·구글 슬라이드·유튜브 주소를 붙여 모아 두고 큰 단추로 하나씩 엽니다. 학생 표시한 것만 학생용 링크·QR 로.', panel: { kind: 'add-block' } },
       { icon: 'grid', title: '틸더스 앱 추천', desc: '수업 자료 블록의 [틸더스]에서 주제·학년으로 수업 앱을 추천받아 담습니다.', ask: '자석 수업에 쓸 3학년 과학 앱 추천해 줘', server: true },
     ],

@@ -1,7 +1,8 @@
 import { join } from 'node:path';
 
 const env = process.env;
-const publicUrl = (env.PUBLIC_URL ?? 'http://localhost:3000').replace(/\/$/, '');
+// Render 처럼 서비스 주소를 알려 주는 곳(RENDER_EXTERNAL_URL)이면 따로 적지 않아도 그 주소를 쓴다(render.yaml 한 번에 설치)
+const publicUrl = (env.PUBLIC_URL || env.RENDER_EXTERNAL_URL || 'http://localhost:3000').replace(/\/$/, '');
 
 export const config = {
   port: Number(env.PORT ?? 3000),

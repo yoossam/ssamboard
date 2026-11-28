@@ -59,6 +59,22 @@
 <h1>서버 설치판 간편 설명서</h1>
 <p class="lead">내 컴퓨터에 쌤보드를 설치하는 법. <b>AI 에게 맡기면</b> 가장 쉽습니다.</p>
 
+<section class="card" id="cloud">
+  <h2>방법 0 · 클라우드에 한 번에 <span class="label">내 컴퓨터 없이</span></h2>
+  <p class="why">단추를 누르면 Render(클라우드)가 서버와 DB 를 만들고 내 쌤보드 주소를 줍니다. 명령어가 필요 없습니다.</p>
+  <ol class="steps">
+    <li><b><a href="https://render.com/deploy?repo=__REPO_URL__" rel="noreferrer">Render 로 설치</a> 누르기</b>
+      <p>GitHub 이나 구글 계정으로 Render 에 가입·로그인합니다. 저장소의 <code>render.yaml</code> 을 읽어 <b>ssamboard</b>(웹)와 <b>ssamboard-db</b>(DB)를 만들 준비가 된 화면이 나옵니다.</p></li>
+    <li><b>Deploy Blueprint 누르고 기다리기(5~10분)</b>
+      <p>암호화 열쇠(MASTER_KEY)와 설치 코드(SETUP_CODE)는 Render 가 무작위로 만들어 넣습니다. 끝나면 <b>ssamboard</b> 서비스 위쪽에 <b>https://○○.onrender.com</b> 주소가 생깁니다.</p></li>
+    <li><b>설치 코드 복사해 계정 만들기</b>
+      <p>Render 의 <b>ssamboard → Environment</b> 에서 <code>SETUP_CODE</code> 값을 복사하고, 내 쌤보드 주소를 열어 붙여 넣은 뒤 이름 · 이메일 · 암호, PIN 6자리를 정합니다.</p></li>
+    <li><b>AI 열쇠 넣기</b>
+      <p>메뉴 → 설정 → 일반에서 AI 모델(Claude · GPT)을 고르고 API 키를 넣습니다.</p></li>
+  </ol>
+  <p class="why"><b>무료 요금제는 써 보기용입니다.</b> 웹은 15분 쉬면 잠들고(다음 접속이 30초쯤 느림, 잠든 동안 일정 알림도 쉼), 무료 DB 는 만든 지 30일이 지나면 없어집니다. 계속 쓰려면 Render 대시보드에서 <b>ssamboard</b>·<b>ssamboard-db</b> 를 유료 요금제로 올리세요(비용은 Render 가 받습니다). 새 판으로 바꿀 때는 Render 에서 <b>Manual Deploy</b> 를 누릅니다(설치한 서버는 저절로 바뀌지 않음).</p>
+</section>
+
 <section class="card prompt">
   <h2>방법 1 · AI 에게 맡기기 <span class="label">추천</span></h2>
   <p class="why">아래 글을 복사해 Claude 나 ChatGPT 에 붙여 넣으세요. 내 컴퓨터에 맞춰 한 단계씩 알려 줍니다.</p>

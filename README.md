@@ -50,6 +50,20 @@
 
 ## 서버 트랙
 
+### 클라우드에 한 번에(내 컴퓨터 없이)
+
+공개 첫 화면(이 저장소 About 의 웹사이트)의 **[Render 로 설치]** 단추를 누르세요. 또는 아래 주소의 `<이 저장소 주소>` 를 이 저장소 주소(`https://github.com/…/ssamboard`)로 바꿔 엽니다. 포크했다면 내 포크 주소를 넣으면 됩니다.
+
+```
+https://render.com/deploy?repo=<이 저장소 주소>
+```
+
+단추를 누르면 Render 가 이 저장소의 `render.yaml` 로 웹 서버와 Postgres 를 만들고 `https://○○.onrender.com` 주소를 줍니다.
+`MASTER_KEY`·`SETUP_CODE` 는 Render 가 무작위로 만들고, 주소는 `RENDER_EXTERNAL_URL` 로 저절로 잡힙니다.
+끝나면 Render 의 **ssamboard → Environment** 에서 `SETUP_CODE` 를 복사해 내 주소 첫 화면에서 계정을 만드세요.
+무료 요금제는 써 보기용입니다(웹은 15분 쉬면 잠들고, 무료 DB 는 30일 뒤 없어짐) — 계속 쓰려면 웹·DB 를 유료 요금제로 올리세요.
+새 판은 Render 에서 **Manual Deploy** 로 받습니다.
+
 ### 설치 (10분)
 
 > 처음이면 공개 주소의 **서버 설치판 간편 설명서**(`install.html`)를 보세요 — Claude·ChatGPT 에 붙여 넣으면 한 단계씩 설치를 도와주는 글이 있습니다.

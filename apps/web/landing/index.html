@@ -77,6 +77,16 @@
     .point h3 { margin: 0; font-size: 1.15rem; }
     .point p { font-size: .95rem; }
   }
+  /* 서버에 한 번에 설치(Render) — 2026-11-28 */
+  .cloud { margin: 28px 0 0; background: var(--card); border: 1px solid var(--line); border-radius: var(--r-page); padding: 28px; }
+  .cloud h2 { font-size: 1.45rem; margin: 0 0 6px; font-weight: 600; }
+  .cloud p { margin: 0 0 14px; color: var(--sub); font-size: 1.02rem; line-height: 1.6; }
+  .cloud ol { margin: 0 0 18px; padding-left: 1.3em; font-size: 1.08rem; line-height: 1.75; }
+  .cloud .row { display: flex; flex-wrap: wrap; gap: 10px; }
+  .cloud .row .btn { display: inline-block; padding: 14px 22px; font-size: 1.05rem; }
+  .cloud pre { white-space: pre-wrap; word-break: break-word; background: var(--tag); border-radius: var(--r-inner); padding: 14px 16px; font-size: .95rem; line-height: 1.6; margin: 14px 0 0; position: relative; }
+  .cloud .copy { position: absolute; top: 8px; right: 8px; border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 6px 14px; font: inherit; font-size: .9rem; cursor: pointer; }
+  .cloud details summary { cursor: pointer; font-size: 1.02rem; margin-top: 14px; }
   @media (prefers-reduced-motion: reduce) { .btn { transition: none; } }
 </style>
 </head>
@@ -113,7 +123,7 @@
     <span class="label">내 서버 · 모든 기능</span>
     <h2>서버 설치판</h2>
     <ul>
-      <li>설치 명령 한 번(약 10분)</li>
+      <li>단추 한 번으로 클라우드에, 또는 내 컴퓨터에</li>
       <li>자료는 내 서버에, PIN 잠금</li>
       <li>일정 알림 · 자동 수합 늘 켜짐</li>
       <li>포크해서 내 것으로 고쳐 쓰기</li>
@@ -123,6 +133,37 @@
 </div>
 <p class="note">AI 는 내 API 열쇠로 씁니다(열쇠 없이도 보드는 쓸 수 있어요). 두 판 사이 자료 옮기기도 됩니다.</p>
 
+<section class="cloud" id="cloud">
+  <h2>서버 설치판을 내 컴퓨터 없이 한 번에</h2>
+  <p>단추 하나로 클라우드(Render)에 서버와 DB 를 만들고, 바로 쓸 수 있는 내 쌤보드 주소(<b>https://○○.onrender.com</b>)를 받습니다. 명령어를 몰라도 됩니다.</p>
+  <ol>
+    <li>아래 <b>[Render 로 설치]</b>를 눌러 GitHub 이나 구글로 Render 에 가입·로그인합니다.</li>
+    <li>보이는 화면에서 이름을 그대로 두고 <b>Deploy Blueprint(배포)</b>를 누릅니다. 5~10분 기다리면 <b>ssamboard</b> 서비스에 주소가 생깁니다.</li>
+    <li>Render 의 <b>ssamboard → Environment</b> 에서 <b>SETUP_CODE</b> 값을 복사해, 내 쌤보드 주소 첫 화면에 붙여 넣고 이름·이메일·암호와 PIN 을 정합니다.</li>
+  </ol>
+  <div class="row">
+    <a class="btn primary" href="https://render.com/deploy?repo=__REPO_URL__" rel="noreferrer">Render 로 설치</a>
+    <a class="btn secondary" href="./install.html#cloud">자세한 안내</a>
+  </div>
+  <details>
+    <summary>AI 에게 한 단계씩 물으며 하기(복사해서 붙여 넣기)</summary>
+    <pre id="cloud-prompt"><button class="copy" type="button" data-copy="cloud-prompt">복사</button>쌤보드(선생님용 업무 보드)를 Render 에 설치하려고 해. 컴퓨터를 잘 모르는 사람도 따라 할 수 있게 한 번에 한 단계씩만 알려 주고, 내가 화면에 보이는 것을 말하면 다음 단계로 가 줘.
+
+- 설치 단추 주소: https://render.com/deploy?repo=__REPO_URL__
+- 저장소: __REPO_URL__ (맨 위의 render.yaml 이 서버와 DB 를 만든다)
+
+순서
+1. 위 단추 주소를 열고 Render 에 가입·로그인하는 법(GitHub 이나 구글 계정)을 알려 줘.
+2. Blueprint 화면에서 무엇을 누르면 되는지, 끝날 때까지 얼마나 걸리는지 알려 줘.
+3. 끝나면 ssamboard 서비스의 주소(https://….onrender.com)를 찾는 곳과, Environment 에서 SETUP_CODE 를 복사하는 곳을 알려 줘.
+4. 내 쌤보드 주소를 열어 설치 코드·이름·이메일·암호·PIN 6자리를 정하고, 설정 → 일반에서 AI 열쇠를 넣는 데까지 안내해 줘.
+5. 무료 요금제는 시험용(웹은 15분 쉬면 잠들고, 무료 DB 는 30일 뒤 없어짐)이라는 것과, 계속 쓰려면 웹·DB 를 유료 요금제로 올리는 법도 알려 줘.
+
+주의: 비밀 값(SETUP_CODE, MASTER_KEY, API 키, 암호)은 대화에 붙여 넣지 말라고 나에게 알려 줘.</pre>
+  </details>
+  <p style="margin:14px 0 0">무료 요금제는 <b>써 보기용</b>입니다. 웹은 15분 동안 아무도 안 쓰면 잠들고(다음 접속이 30초쯤 느림), 무료 DB 는 만든 지 30일이 지나면 없어집니다. 계속 쓰려면 Render 에서 웹·DB 를 유료 요금제로 올리세요. 비용은 Render 가 받고, 쌤보드는 따로 돈을 받지 않습니다.</p>
+</section>
+
 <footer>
   <a href="./guide.html">사용 안내</a>
   <a href="./privacy.html">개인정보 처리방침</a>
@@ -131,6 +172,13 @@
 </footer>
 </main>
 <script>
+  document.querySelectorAll('.copy').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var pre = document.getElementById(b.dataset.copy);
+      var text = Array.prototype.filter.call(pre.childNodes, function (n) { return n !== b; }).map(function (n) { return n.textContent; }).join('');
+      navigator.clipboard.writeText(text.trim()).then(function () { b.textContent = '복사했어요'; setTimeout(function () { b.textContent = '복사'; }, 1600); });
+    });
+  });
   // 이미 쓰던 사람은 바로 이어 열 수 있게(앱이 이 브라우저에 고른 트랙을 기억한다 — apps/local/src/index.ts TRACK_KEY)
   try { if (localStorage.getItem('ssamboard.track')) document.getElementById('resume').style.display = 'block'; } catch (e) {}
   // 예전엔 앱이 맨 위 주소에 있었다 — 그때 등록된 서비스 워커(맨 위 범위)를 내려 새 첫 화면이 바로 보이게 한다.
