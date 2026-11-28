@@ -46,7 +46,7 @@ test('서버 코드가 브라우저 틀(PGlite)에서 그대로 돈다', async (
   assert.deepEqual(r.upload.header, ['이름', '점수']);
   assert.equal(r.tableStatus, 201);
   assert.equal(r.rows, 2);
-  assert.equal(r.exportTables, 15); // 구글 문서 공유 링크(shares)도 옮긴다
+  assert.equal(r.exportTables, 17); // 구글 문서 공유 링크(shares)도 옮긴다
   assert.deepEqual(r.connectors, []);
   assert.match(r.connectNoGoogle, /구글로 로그인해야/);
   assert.match(r.webhook, /웹훅을 쓸 수 없습니다/);
@@ -57,6 +57,53 @@ test('서버 코드가 브라우저 틀(PGlite)에서 그대로 돈다', async (
   assert.match(r.importForeign, /없는 항목을 가리킵니다/);
   assert.deepEqual(r.tasksAfterForeign, ['동의서 걷기']);
   assert.match(r.undoBad, /되돌리기 기록이 잘못됐습니다/);
+  // 구글 설문 퀴즈
+  assert.equal(r.gquiz.url, 'https://docs.google.com/forms/d/e/R1/viewform');
+  assert.equal(r.gquiz.source, 'google');
+  assert.equal(r.gquiz.closesAt, null);
+  assert.deepEqual(r.gquiz.added, [2, 0]);
+  assert.deepEqual(r.gquiz.names, ['3번', '4번']);
+  assert.deepEqual(r.gquiz.q1, [1, 1]);
+  assert.equal(r.gquiz.avg, 1.5);
+  assert.equal(r.gquiz.totalAfterHide, 1); // 숨긴 응답은 다시 읽어도 숨김
+  assert.equal(r.gquiz.closedStatus, 'closed');
+  assert.match(r.gquiz.note, /응답 받기를 끄지 못했습니다/);
+  assert.match(r.gquiz.rotate, /링크를 바꿀 수 없습니다/);
+  assert.equal(r.gquiz.studentPage, true); // 쌤보드 학생 페이지로는 안 열림
+  assert.deepEqual(r.gquiz.edited, [0, 1]); // 3번이 고쳐 낸 답(숨긴 4번은 빠짐)
+  assert.equal(r.gquiz.cleared, 2);
+  assert.equal(r.gquiz.resyncAdded, 0);
+  assert.equal(r.gquiz.afterClear, 0);
+  // 보드마다 내 메뉴
+  assert.deepEqual(r.boardMenus.kinds, ['class']);
+  assert.equal(r.boardMenus.workSame, true);
+  // 수업 자료
+  assert.match(r.links.bad, /1번 주소가 잘못됐습니다/);
+  assert.equal(r.links.board, 'class');
+  assert.match(r.links.dup, /이미 담긴 주소/);
+  assert.equal(r.links.conflict, 409);
+  assert.deepEqual(r.links.afterAdd, ['slides:도입:true', 'youtube:유튜브 자료:false']);
+  assert.deepEqual(r.links.afterUndo, ['slides:도입:true']);
+  // 수업 보드·즉석 퀴즈
+  assert.match(r.quiz.badQuiz, /보기는 2~6개/);
+  assert.match(r.quiz.detail, /정답 1번 1/);
+  assert.deepEqual(r.quiz.submits, [true, true]);
+  assert.match(r.quiz.noName, /번호나 별명/);
+  assert.match(r.quiz.badOpt, /답을 하나 이상/);
+  assert.equal(r.quiz.botOk, true); // 봇은 받은 척만
+  assert.equal(r.quiz.total, 2);
+  assert.equal(r.quiz.graded, 2);
+  assert.equal(r.quiz.avg, 1.5);
+  assert.deepEqual(r.quiz.q1, [1, 1]);
+  assert.equal(r.quiz.q2correct, 2);
+  assert.deepEqual(r.quiz.short, [{ text: '통분', n: 1 }]);
+  assert.deepEqual(r.quiz.classTypes, ['memo', 'quiz']);
+  assert.equal(r.quiz.workHasQuiz, false);
+  assert.equal(r.quiz.closed, 410);
+  assert.match(r.quiz.undoSkipped.join(' '), /학생 응답 2개/);
+  assert.equal(r.quiz.quizKept, 1);
+  assert.equal(r.quiz.blockKept, true);
+  assert.equal(r.quiz.boardAfter, 'work');
   // 내 메뉴
   assert.equal(r.menuCreate, 201);
   assert.deepEqual(r.menus, [

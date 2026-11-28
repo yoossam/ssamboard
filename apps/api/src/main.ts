@@ -7,6 +7,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { AppModule } from './app.module';
+import { runWithBoard } from './common/board-context';
 import { assertConfig, config } from './config';
 import { Db, runMigrations } from './db/db.service';
 
@@ -52,10 +53,14 @@ async function bootstrap(): Promise<void> {
   app.disable('x-powered-by');
   app.use(securityHeaders);
   app.use(cookieParser());
+  // 이 요청이 보는 보드(업무·수업, 기기마다) — common/board-context.ts
+  app.use((req: Request, _res: Response, next: NextFunction) => runWithBoard(req.headers['x-board'], next));
   // AI 창의 이미지 첨부(최대 4장, 화면에서 줄여 보냄) 때문에 2MB → 16MB(2026-11-27). 다른 요청은 각자 글자 수를 따로 막는다.
   app.useBodyParser('json', { limit: '16mb' });
-  // 공유 페이지(/s/<열쇠>)는 /api 밖에서 로그인 없이 연다(shares.controller.ts)
-  app.setGlobalPrefix('api', { exclude: ['health', { path: 's/:token', method: RequestMethod.GET }] });
+  // 공유 페이지(/s/<열쇠>)와 학생 퀴즈(/q/<열쇠>)는 /api 밖에서 로그인 없이 연다(shares.controller.ts, quizzes.controller.ts)
+  app.setGlobalPrefix('api', {
+    exclude: ['health', { path: 's/:token', method: RequestMethod.GET }, { path: 'q/:token', method: RequestMethod.GET }, { path: 'q/:token', method: RequestMethod.POST }],
+  });
   app.enableShutdownHooks();
 
   const applied = await runMigrations(app.get(Db).pool);
@@ -72,7 +77,7 @@ async function bootstrap(): Promise<void> {
       },
     });
     app.use((req: Request, res: Response, next: NextFunction) => {
-      if (req.method !== 'GET' || req.path.startsWith('/api/') || req.path.startsWith('/s/') || req.path === '/health' || /\.[a-z0-9]+$/i.test(req.path)) return next();
+      if (req.method !== 'GET' || req.path.startsWith('/api/') || req.path.startsWith('/s/') || req.path.startsWith('/q/') || req.path === '/health' || /\.[a-z0-9]+$/i.test(req.path)) return next();
       res.setHeader('Cache-Control', 'no-cache');
       res.sendFile(index);
     });

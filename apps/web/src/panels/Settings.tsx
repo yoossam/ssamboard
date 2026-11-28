@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { LOCK_MINUTE_OPTIONS, MEMORY_MAX, MEMORY_TEXT_MAX, PIN_LENGTH, type MemoryDto, type AuthStatus, type ConnectorDto, type SettingsDto } from '@jarvis/shared';
+import { LOCK_MINUTE_OPTIONS, MEMORY_MAX, MEMORY_TEXT_MAX, PIN_LENGTH, type MemoryDto, type AuthStatus, type ConnectorDto, type SettingsDto, BOARD_KIND_LABEL } from '@jarvis/shared';
 import { Icon } from '../components/Icon';
 import { Button, ButtonRow, Empty, Field, IconButton, inputClass, monoInput, Notice, PinField, Sheet, Tabs, Tag } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
@@ -583,6 +583,7 @@ function DataTab() {
 /** 내 메뉴(위쪽 바로가기 줄): 순서·이름·지우기, AI 추천으로 더하기, 처음 안내 다시 보기 */
 function MenuTab({ settings }: { settings: SettingsDto }) {
   const toast = useApp((s) => s.toast);
+  const boardKind = useApp((s) => s.boardKind);
   const { data: menus } = useMenus();
   const { data: tables } = useTables();
   const [editing, setEditing] = useState<{ id: string; label: string } | null>(null);
@@ -611,7 +612,10 @@ function MenuTab({ settings }: { settings: SettingsDto }) {
   };
   return (
     <div className="space-y-4">
-      <p className="text-sm text-sub">위쪽 줄의 바로가기입니다. 누르면 정해 둔 일을 합니다(AI 에게 시키기 · 표 열기 · 표에 한 줄 넣기 · 링크 · 앱 화면).</p>
+      <p className="text-sm text-sub">위쪽 줄(또는 '내 메뉴' 블록)의 바로가기입니다. 누르면 정해 둔 일을 합니다(AI 에게 시키기 · 표 열기 · 표에 한 줄 넣기 · 링크 · 앱 화면).</p>
+      <Notice>
+        지금 <b>{BOARD_KIND_LABEL[boardKind]} 보드</b>의 메뉴입니다. 메뉴는 보드마다 따로 있습니다 — 다른 보드의 메뉴는 위쪽 [업무 | 수업]으로 바꾼 뒤 고칩니다.
+      </Notice>
       {list.length === 0 ? (
         <Empty>아직 메뉴가 없습니다. 아래에서 AI 에게 추천받으세요.</Empty>
       ) : (

@@ -1,18 +1,33 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import GridLayout from 'react-grid-layout';
-import { blockBg, boardBg, GRID_COLS, memoColor, MIN_BLOCK_SIZE, mobileOrder, SHAREABLE_BLOCKS, titleColor, type BlockDto, type BoardDto, type GridPos } from '@jarvis/shared';
+import {
+  blockBg,
+  boardBg,
+  GRID_COLS,
+  memoColor,
+  MIN_BLOCK_SIZE,
+  mobileOrder,
+  SHAREABLE_BLOCKS,
+  titleColor,
+  type BlockDto,
+  type BoardDto,
+  type GridPos,
+  BOARD_KINDS,
+  BOARD_KIND_LABEL,
+} from '@jarvis/shared';
 import { BLOCK_ICON, Icon } from '../components/Icon';
 import { Button, CountBadge, Empty, IconButton, useIsPhone, useSize } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
-import { keys, queryClient, refresh, useBoard, useCommands, useEvents, useNotifications, useSettings, useTasks } from '../lib/data';
+import { keys, queryClient, refresh, useBoard, useCommands, useEvents, useNotifications, useSettings, useTasks, boardKey } from '../lib/data';
 import { dateLabel, dayKey } from '../lib/format';
 import { FILE_ACCEPT, filesFrom, googleLinksOnly, MAX_FILES, MAX_IMAGES, readAttachedFile, shrinkImage, splitFiles } from '../lib/images';
 import { useApp } from '../lib/store';
 import { showOnBoard } from '../lib/results';
 import { BlockBody, BlockCount, PhoneTasks, TileLines } from './blocks';
+import { LinksBody } from './links';
 import { BlockStyleButton } from './memo';
 import { BoardStyleButton } from './boardStyle';
-import { MenuBar } from '../menu/menu';
+import { MenuBar, MenuBlockBody } from '../menu/menu';
 
 // 한 페이지 보드(ONE-1). PC는 24칸 격자에 블록을 놓고, 휴대폰은 2열 타일로 보여준다.
 
@@ -40,12 +55,13 @@ interface Item extends GridPos {
 const toItems = (blocks: BlockDto[]): Item[] =>
   blocks.map((b) => {
     const min = MIN_BLOCK_SIZE[b.type] ?? MIN_BLOCK_SIZE.tasks;
-    return { i: b.id, ...b.layout_lg, minW: min.w, minH: min.h, isDraggable: !b.pinned, isResizable: true };
+    // 자리 고정한 블록은 움직이지 않는다 — 다른 블록에 밀리지도 않는다(static)
+    return { i: b.id, ...b.layout_lg, minW: min.w, minH: min.h, isDraggable: !b.pinned, isResizable: !b.pinned, static: b.pinned };
   });
 const samePos = (a: GridPos, b: GridPos) => a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
 
 function patchBoard(update: (blocks: BlockDto[]) => BlockDto[]): void {
-  queryClient.setQueryData<BoardDto>(keys.board, (board) => board && { ...board, blocks: update(board.blocks) });
+  queryClient.setQueryData<BoardDto>(boardKey(), (board) => board && { ...board, blocks: update(board.blocks) });
 }
 
 export async function togglePin(block: BlockDto): Promise<void> {
@@ -56,6 +72,28 @@ export async function togglePin(block: BlockDto): Promise<void> {
     useApp.getState().toast(errorMessage(e), 'error');
     void refresh('board');
   }
+}
+
+/** 업무 | 수업 보드 전환(기기마다 기억 — 교실 TV 와 휴대폰이 따로 — 2026-11-28 두 보드) */
+function BoardSwitch() {
+  const kind = useApp((s) => s.boardKind);
+  const setBoardKind = useApp((s) => s.setBoardKind);
+  return (
+    <div role="tablist" aria-label="보드" className="ml-1 flex h-8 shrink-0 items-center rounded-full border bg-ground p-0.5">
+      {BOARD_KINDS.map((k) => (
+        <button
+          key={k}
+          type="button"
+          role="tab"
+          aria-selected={kind === k}
+          onClick={() => kind !== k && setBoardKind(k)}
+          className={`h-7 rounded-full px-3 text-sm font-bold transition ${kind === k ? 'bg-accent text-white shadow-sm' : 'text-sub hover:text-ink'}`}
+        >
+          {BOARD_KIND_LABEL[k]}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 function TopBar() {
@@ -69,7 +107,8 @@ function TopBar() {
       <div className="flex h-10 items-center gap-1 px-1">
         <IconButton icon="menu" label="메뉴" size={36} onClick={() => open({ kind: 'menu' })} />
         <h1 className="text-sm font-bold text-accent">쌤보드</h1>
-        <span className="min-w-0 shrink-0 truncate text-xs text-sub">{dateLabel(new Date())}</span>
+        <BoardSwitch />
+        {!phone && <span className="min-w-0 shrink-0 truncate text-xs text-sub">{dateLabel(new Date())}</span>}
         {/* 내 메뉴(위쪽 바로가기) — 휴대폰은 아래 한 줄 */}
         {phone ? <span className="flex-1" /> : <MenuBar />}
         <ResultsButton />
@@ -369,7 +408,8 @@ function DesktopBoard({ blocks }: { blocks: BlockDto[] }) {
           isResizable
           draggableHandle=".block-drag"
           draggableCancel=".no-drag"
-          compactType="vertical"
+          // 놓은 자리 그대로(2026-11-28 선생님 "원하는 위치에 고정") — 위로 끌어 올려 빈칸을 메우지 않는다. 겹치면 밀린 블록만 아래로 비킨다.
+          compactType={null}
           onDragStop={markDrop}
           onResizeStop={markDrop}
           onLayoutChange={onLayoutChange}
@@ -497,7 +537,7 @@ function PhoneBoard({ blocks }: { blocks: BlockDto[] }) {
               <BlockCount block={b} />
               <Icon name="next" size={18} className="shrink-0 text-sub" />
             </div>
-            {b.type === 'tasks' ? <PhoneTasks block={b} /> : <TileLines block={b} max={4} big />}
+            {b.type === 'tasks' ? <PhoneTasks block={b} /> : b.type === 'menu' ? <MenuBlockBody /> : b.type === 'links' ? <LinksBody block={b} /> : <TileLines block={b} max={4} big />}
           </section>
         ))}
       </div>
@@ -527,6 +567,30 @@ function QuickTasks({ onFiles, onText }: { onFiles: (files: File[], prompt?: str
     return true;
   };
   const chip = 'flex h-8 shrink-0 items-center gap-1.5 rounded-full border bg-card px-3 text-sm whitespace-nowrap shadow-sm transition hover:border-accent hover:text-accent';
+  const kind = useApp((s) => s.boardKind);
+  // 수업 보드는 수업 중에 바로 쓰는 것만(2026-11-28 두 보드) — 말을 채워 주고, 주제만 적어 보내면 된다
+  if (kind === 'class')
+    return (
+      <div className="mb-1.5 flex items-center gap-1.5 overflow-x-auto px-1 [scrollbar-width:none]" aria-label="빠른 수업">
+        <button
+          type="button"
+          className={chip}
+          onClick={() => ready() && onText('퀴즈 5문제 만들어 줘 — 주제: ')}
+          title="주제를 적으면 객관식 퀴즈를 만들고, [퀴즈 시작]을 누르면 학생 주소가 크게 열립니다"
+        >
+          <Icon name="check" size={16} className="text-accent" />
+          퀴즈 만들기
+        </button>
+        <button type="button" className={chip} onClick={() => ready() && onText('O·X 퀴즈 5문제 만들어 줘 — 주제: ')} title="O·X 로 빨리 확인하는 퀴즈">
+          <Icon name="check" size={16} className="text-accent" />
+          O·X 퀴즈
+        </button>
+        <button type="button" className={chip} onClick={() => ready() && onText('방금 낸 퀴즈 결과를 정리해 줘')} title="마감한 퀴즈의 많이 틀린 문항·오답·다시 설명할 점">
+          <Icon name="sparkle" size={16} className="text-accent" />
+          결과 정리
+        </button>
+      </div>
+    );
   return (
     <div className="mb-1.5 flex items-center gap-1.5 overflow-x-auto px-1 [scrollbar-width:none]" aria-label="빠른 업무">
       <button type="button" className={chip} onClick={() => ready() && notice.current?.click()} title="가정통신문 사진·PDF·한글 파일을 고르면 날짜를 찾아 일정·할 일로 넣습니다">

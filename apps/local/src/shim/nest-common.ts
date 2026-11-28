@@ -51,6 +51,8 @@ export interface ExecutionContext {
 // ── 클래스 ──
 export const Injectable = (_opts?: unknown) => (_target: Function) => undefined;
 export const Module = (_opts?: unknown) => (_target: Function) => undefined;
+/** 생성자 인자 꾸밈(브라우저 판은 직접 new 하므로 하는 일 없음) */
+export const Optional = () => (_target: object, _key: string | symbol | undefined, _index: number) => undefined;
 export function Controller(prefix?: string | { path?: string }) {
   return (target: Function) => {
     const p = typeof prefix === 'string' ? prefix : (prefix?.path ?? '');
@@ -59,9 +61,12 @@ export function Controller(prefix?: string | { path?: string }) {
 }
 
 // ── 주소 ──
-const route = (method: string) => (path = '') => (target: object, key: string | symbol, _desc?: PropertyDescriptor) => {
-  metaOf(target.constructor).routes.push({ method, path, key: String(key) });
-};
+const route =
+  (method: string) =>
+  (path = '') =>
+  (target: object, key: string | symbol, _desc?: PropertyDescriptor) => {
+    metaOf(target.constructor).routes.push({ method, path, key: String(key) });
+  };
 export const Get = route('GET');
 export const Post = route('POST');
 export const Put = route('PUT');
@@ -79,7 +84,10 @@ export function SetMetadata(metaKey: string, value: unknown) {
   };
 }
 export const HttpCode = (_code: number) => (_t: object, _k: string | symbol, _d?: PropertyDescriptor) => undefined;
-export const UseInterceptors = (..._i: unknown[]) => (_t: object, _k?: string | symbol, _d?: PropertyDescriptor) => undefined;
+export const UseInterceptors =
+  (..._i: unknown[]) =>
+  (_t: object, _k?: string | symbol, _d?: PropertyDescriptor) =>
+    undefined;
 export const UseGuards = UseInterceptors;
 
 // ── 인자 ──

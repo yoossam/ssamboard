@@ -102,7 +102,7 @@ export class SharesService {
   private async prepare(user: UserRow, body: any, fixedShow?: string[]) {
     const blockId = isUuid(body?.block_id) ? (body.block_id as string) : bad('공유할 블록을 고르세요.');
     const block = (await this.block(user.id, blockId)) ?? notFound('블록');
-    if (!SHAREABLE_BLOCKS.includes(block!.type)) bad('이 블록은 공유할 수 없습니다(할 일·일정·표·메모·AI 결과만 됩니다).');
+    if (!SHAREABLE_BLOCKS.includes(block!.type)) bad('이 블록은 공유할 수 없습니다(할 일·일정·표·메모·AI 결과·수업 자료만 됩니다).');
     const days = config.shareMode === 'drive' ? 0 : Number(body?.days ?? 30);
     if (!(SHARE_DAYS as readonly number[]).includes(days)) bad(`기간은 ${SHARE_DAYS.filter(Boolean).join('·')}일 또는 기간 없음(0) 중 하나입니다.`);
     const asked: ShareOptions = fixedShow ? { show_columns: fixedShow } : checkOptions(body?.options);

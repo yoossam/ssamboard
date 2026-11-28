@@ -387,4 +387,62 @@ create index memories_user on memories(user_id, created_at);
 alter table uploads add column kind text not null default 'table';
 `,
   },
+  {
+    // 수업 보드·즉석 퀴즈(2026-11-28 선생님 "업무 보드·수업 보드 두 개로"):
+    // 보드마다 종류(work·class), AI 계획은 만든 때의 보드를 적어 두고 승인 때 그 보드에 놓는다.
+    // 퀴즈 응답은 표가 아니라 따로 쌓는다(고칠 수 없는 원본 — 코덱스·제미나이 검토). 학생은 번호·별명만, 로그인 없음.
+    name: '010_class_board_quiz',
+    sql: /* sql */ `
+alter table boards add column kind text not null default 'work' check (kind in ('work', 'class'));
+create unique index boards_user_kind on boards(user_id, kind);
+alter table ai_commands add column board_kind text not null default 'work' check (board_kind in ('work', 'class'));
+create table quizzes (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  token text not null unique,
+  title text not null,
+  spec jsonb not null,
+  status text not null default 'open' check (status in ('open', 'closed')),
+  closes_at timestamptz,
+  max_responses int not null default 200,
+  command_id uuid,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz
+);
+create index quizzes_user on quizzes(user_id, created_at);
+create table quiz_responses (
+  id uuid primary key default gen_random_uuid(),
+  quiz_id uuid not null references quizzes(id) on delete cascade,
+  user_id uuid not null references users(id) on delete cascade,
+  name text not null default '',
+  answers jsonb not null default '{}',
+  score int not null default 0,
+  hidden boolean not null default false,
+  created_at timestamptz not null default now()
+);
+create index quiz_responses_quiz on quiz_responses(quiz_id, created_at);
+`,
+  },
+  {
+    // 구글 설문 퀴즈 모드(2026-11-28 수업 보드 2단계): 같은 퀴즈 블록·집계를 쓰고, 응답은 구글에서 읽어 quiz_responses 에 쌓는다.
+    name: '011_quiz_google',
+    sql: /* sql */ `
+alter table quizzes add column source text not null default 'board' check (source in ('board', 'google'));
+alter table quizzes add column form jsonb;
+alter table quizzes add column synced_at timestamptz;
+alter table quiz_responses add column external_id text;
+-- 쌤보드에서 지운 구글 응답의 자리표(다시 읽어도 돌아오지 않게 — 답·이름은 비운다)
+alter table quiz_responses add column removed boolean not null default false;
+create unique index quiz_responses_external on quiz_responses(quiz_id, external_id) where external_id is not null;
+`,
+  },
+  {
+    // 보드마다 내 메뉴(2026-11-28 선생님 "진행마저") — 업무 메뉴가 수업 보드에 섞이지 않게. 있던 메뉴는 업무 보드.
+    name: '012_menu_board',
+    sql: /* sql */ `
+alter table menu_items add column board_kind text not null default 'work' check (board_kind in ('work', 'class'));
+create index menu_items_user_board on menu_items(user_id, board_kind, position);
+`,
+  },
 ];

@@ -7,7 +7,7 @@ import { MENU_ACTION_LABEL, MENU_PANEL_LABEL, type MenuAction, type MenuDraft, t
 import { Icon } from '../components/Icon';
 import { Button, ButtonRow, Notice, Tag, inputClass, useIsPhone } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
-import { refresh, useMenus, useTables } from '../lib/data';
+import { refresh, useBoard, useMenus, useTables } from '../lib/data';
 import { useApp } from '../lib/store';
 
 /** 메뉴를 눌렀을 때 */
@@ -54,12 +54,57 @@ export function describeAction(
   return `${label} — ${name}`;
 }
 
-/** 위쪽 줄의 메뉴 단추들. 휴대폰은 머리줄 아래 한 줄을 좌우로 넘긴다. */
+/** 보드에 '내 메뉴' 블록이 있나 — 있으면 위쪽 줄은 숨겨 메뉴를 한 곳에만 둔다(2026-11-28 세 모델 합의). */
+export function useMenuOnBoard(): boolean {
+  const { data: board } = useBoard();
+  return !!board?.blocks.some((b) => b.type === 'menu');
+}
+
+/**
+ * '내 메뉴' 블록: 메뉴 이름만 작은 단추로 모은다(2026-11-28 선생님 제안). 블록 폭에 맞춰 여러 칸으로 늘어서고,
+ * 누르면 위쪽 줄과 같은 동작(runMenu). AI 동작은 계획 → 승인을 거치고, 결과는 [처리 결과]에서 본다.
+ */
+export function MenuBlockBody() {
+  const { data: menus, isLoading } = useMenus();
+  const open = useApp((s) => s.open);
+  const items = menus ?? [];
+  return (
+    <div className="h-full overflow-auto p-2">
+      <div className="grid gap-1.5 [grid-template-columns:repeat(auto-fill,minmax(8.5rem,1fr))]">
+        {items.map((m) => (
+          <button
+            key={m.id}
+            type="button"
+            title={m.description || m.label}
+            onClick={() => runMenu(m.action)}
+            className="flex min-h-11 min-w-0 items-center gap-2 rounded-lg border bg-card px-2.5 text-left text-sm font-medium transition hover:bg-tint active:scale-[0.98]"
+          >
+            <Icon name={m.icon} size={16} className="shrink-0 text-accent" />
+            <span className="min-w-0 flex-1 truncate">{m.label}</span>
+            {m.action.type === 'ask_ai' && <Icon name="sparkle" size={12} className="shrink-0 text-sub" />}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => open({ kind: 'settings', tab: 'menu' })}
+          className="flex min-h-11 min-w-0 items-center gap-2 rounded-lg border border-dashed px-2.5 text-sm text-sub transition hover:bg-tint"
+        >
+          <Icon name="plus" size={16} className="shrink-0" />
+          {isLoading ? '불러오는 중…' : items.length === 0 ? '내 메뉴 만들기' : '메뉴 고치기'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** 위쪽 줄의 메뉴 단추들. 휴대폰은 머리줄 아래 한 줄을 좌우로 넘긴다. 보드에 '내 메뉴' 블록이 있으면 그리지 않는다. */
 export function MenuBar() {
   const { data: menus } = useMenus();
   const phone = useIsPhone();
   const open = useApp((s) => s.open);
+  const onBoard = useMenuOnBoard();
   const items = menus ?? [];
+  if (onBoard) return phone ? null : <span className="flex-1" />;
   const chips = (
     <>
       {items.map((m) => (

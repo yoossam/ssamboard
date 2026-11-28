@@ -72,6 +72,13 @@ export class ConnectorsService {
     return row!.id;
   }
 
+  /** 구글 설문 퀴즈용 접근 토큰 — 트랜잭션 안에서도(q) 부를 수 있게(브라우저 판 DB 는 연결이 하나라 바깥 연결로 읽으면 멈춘다) */
+  async formsToken(userId: string, q: Queryable = this.db): Promise<string> {
+    const connector = await this.googleConnector(userId, q);
+    if (!connector) bad('Google 이 연결돼 있지 않습니다. 설정 → 연결에서 Google 을 먼저 연결하세요.');
+    return this.googleToken(userId, connector!.id, q);
+  }
+
   /** 사용자의 구글 연결(drive.file)로 받은 접근 토큰 — 공유 링크(구글 문서)처럼 표 연결 밖에서 드라이브를 쓸 때. */
   async driveToken(userId: string): Promise<string> {
     const row = await this.db.one<{ id: string }>(`select id from connectors where user_id = $1 and type = 'google_sheets' order by created_at limit 1`, [userId]);

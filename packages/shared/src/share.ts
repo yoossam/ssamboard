@@ -6,7 +6,7 @@
 import type { BlockType } from './types';
 
 /** 공유할 수 있는 블록(알림은 개인 것이라, AI 화면 블록은 아직 빼 둠) */
-export const SHAREABLE_BLOCKS: BlockType[] = ['tasks', 'events', 'table', 'memo', 'ai_result'];
+export const SHAREABLE_BLOCKS: BlockType[] = ['tasks', 'events', 'table', 'memo', 'ai_result', 'links'];
 /** 링크 기간(일). 0 은 기간 없음. 구글 문서(드라이브 트랙)는 구글이 공개 링크에 기간을 둘 수 없어 늘 0 */
 export const SHARE_DAYS = [7, 30, 90, 0] as const;
 

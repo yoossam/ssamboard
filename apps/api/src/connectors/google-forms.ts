@@ -1,4 +1,4 @@
-import type { FormQuestion, FormQuestionType, FormSpec } from '@jarvis/shared';
+import type { FormQuestion, FormQuestionType, FormSpec, QuizSpec } from '@jarvis/shared';
 
 // Google 설문지(Forms API v1)를 부르는 곳. 설문을 만들고, 질문과 응답을 읽는다.
 // 권한은 시트 연결과 같은 drive.file(이 앱이 만든 파일만) 하나로 된다 — forms.create·batchUpdate·get·responses.list 모두 그 범위를 받는다.
@@ -64,6 +64,25 @@ async function call<T>(f: Fetch, token: string, method: 'GET' | 'POST', url: str
   return (await res.json()) as T;
 }
 
+/**
+ * 응답을 받게 연다: 게시(새로 만든 설문지는 게시 안 된 채로 생길 수 있다 — 코덱스·제미나이 검토) + 링크가 있는 누구나 응답.
+ * 학교 계정 정책 등으로 막혀도 설문은 그대로 두고 false 만 돌려준다.
+ */
+export async function openToResponders(token: string, formId: string, f: Fetch = fetch): Promise<boolean> {
+  let ok = true;
+  try {
+    await call(f, token, 'POST', `${FORMS}/${formId}:setPublishSettings`, { publishSettings: { publishState: { isPublished: true, isAcceptingResponses: true } }, updateMask: '*' });
+  } catch {
+    // 옛 방식 설문지는 처음부터 게시된 상태라 이 요청이 없어도 된다 — 아래 권한이 되면 받는다
+  }
+  try {
+    await call(f, token, 'POST', `${DRIVE}/${formId}/permissions`, { type: 'anyone', role: 'reader', view: 'published' }, 'Google Drive API');
+  } catch {
+    ok = false;
+  }
+  return ok;
+}
+
 /** 질문 하나를 설문지의 항목으로 바꾼다. */
 export function questionItem(q: FormQuestion): Record<string, unknown> {
   const kind: Record<string, unknown> =
@@ -108,12 +127,7 @@ export async function createGoogleForm(token: string, spec: FormSpec, f: Fetch =
   const updated = await call<{ form?: any }>(f, token, 'POST', `${FORMS}/${created.formId}:batchUpdate`, { includeFormInResponse: true, requests });
   const questions = questionsOf(updated.form);
   if (questions.length !== spec.questions.length) throw new Error('설문지에 질문을 넣었지만 질문 번호를 돌려받지 못했습니다. 드라이브에 만들어진 설문지를 확인하세요.');
-  let publicLink = true;
-  try {
-    await call(f, token, 'POST', `${DRIVE}/${created.formId}/permissions`, { type: 'anyone', role: 'reader', view: 'published' }, 'Google Drive API');
-  } catch {
-    publicLink = false;
-  }
+  const publicLink = await openToResponders(token, created.formId, f);
   return { form_id: created.formId, responder_uri: String(updated.form?.responderUri ?? created.responderUri ?? ''), questions, public_link: publicLink };
 }
 
@@ -127,7 +141,12 @@ export async function listFormResponses(token: string, formId: string, f: Fetch 
   const out: FormResponse[] = [];
   let pageToken: string | undefined;
   do {
-    const page = await call<{ responses?: FormResponse[]; nextPageToken?: string }>(f, token, 'GET', `${FORMS}/${formId}/responses?pageSize=5000${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`);
+    const page = await call<{ responses?: FormResponse[]; nextPageToken?: string }>(
+      f,
+      token,
+      'GET',
+      `${FORMS}/${formId}/responses?pageSize=5000${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`,
+    );
     out.push(...(page.responses ?? []));
     pageToken = page.nextPageToken;
   } while (pageToken && out.length < FORM_MAX_RESPONSES);
@@ -139,8 +158,16 @@ export async function listFormResponses(token: string, formId: string, f: Fetch 
 export function answerText(response: FormResponse, questionId: string): string {
   const a = response.answers?.[questionId];
   if (!a) return '';
-  if (a.textAnswers?.answers) return a.textAnswers.answers.map((x) => String(x.value ?? '')).filter(Boolean).join(', ');
-  if (a.fileUploadAnswers?.answers) return a.fileUploadAnswers.answers.map((x) => String(x.fileName ?? '')).filter(Boolean).join(', ');
+  if (a.textAnswers?.answers)
+    return a.textAnswers.answers
+      .map((x) => String(x.value ?? ''))
+      .filter(Boolean)
+      .join(', ');
+  if (a.fileUploadAnswers?.answers)
+    return a.fileUploadAnswers.answers
+      .map((x) => String(x.fileName ?? ''))
+      .filter(Boolean)
+      .join(', ');
   return '';
 }
 
@@ -148,4 +175,59 @@ export function answerText(response: FormResponse, questionId: string): string {
 export function responseRows(ref: Pick<FormRef, 'time_col_id' | 'questions'>, columnIds: string[], responses: FormResponse[]): string[][] {
   const byCol = new Map(ref.questions.map((q) => [q.col_id, q.question_id]));
   return responses.map((r) => columnIds.map((col) => (col === ref.time_col_id ? (r.lastSubmittedTime ?? r.createTime ?? '') : byCol.has(col) ? answerText(r, byCol.get(col)!) : '')));
+}
+
+// ── 즉석 퀴즈(구글 설문 퀴즈 모드, 2026-11-28 수업 보드) ─────────────────────────────
+
+/** 퀴즈 문항 → 설문 항목(정답·1점). O·X 는 보기 두 개, 단답은 채점하지 않는다. */
+export function quizItem(q: QuizSpec['questions'][number]): Record<string, unknown> {
+  const options = q.type === 'choice' ? (q.options ?? []) : q.type === 'ox' ? ['O', 'X'] : [];
+  const right = q.type === 'choice' && typeof q.answer === 'number' ? options[q.answer] : q.type === 'ox' ? String(q.answer) : null;
+  const question: Record<string, unknown> =
+    q.type === 'short' ? { required: false, textQuestion: { paragraph: false } } : { required: true, choiceQuestion: { type: 'RADIO', options: options.map((value) => ({ value })) } };
+  if (right) question.grading = { pointValue: 1, correctAnswers: { answers: [{ value: right }] } };
+  return { title: q.text, questionItem: { question } };
+}
+
+export const QUIZ_NAME_TITLE = '번호나 별명';
+
+/**
+ * 구글 설문 퀴즈를 만든다: 빈 설문 → 퀴즈 모드 + 첫 문항 '번호나 별명'(이름·이메일은 받지 않는다) + 문항들 → 링크만 있으면 누구나 응답.
+ * 돌려주는 questions 는 [번호나 별명, q1, q2 …] 차례의 설문 질문 id.
+ */
+export async function createGoogleQuiz(
+  token: string,
+  spec: QuizSpec,
+  f: Fetch = fetch,
+): Promise<{ form_id: string; responder_uri: string; name_qid: string; qids: Record<string, string>; public_link: boolean }> {
+  const created = await call<{ formId: string; responderUri?: string }>(f, token, 'POST', FORMS, { info: { title: spec.title, documentTitle: spec.title } });
+  const requests: Record<string, unknown>[] = [
+    { updateSettings: { settings: { quizSettings: { isQuiz: true } }, updateMask: 'quizSettings.isQuiz' } },
+    { createItem: { item: { title: QUIZ_NAME_TITLE, questionItem: { question: { required: true, textQuestion: { paragraph: false } } } }, location: { index: 0 } } },
+    ...spec.questions.map((q, i) => ({ createItem: { item: quizItem(q), location: { index: i + 1 } } })),
+  ];
+  const updated = await call<{ form?: any }>(f, token, 'POST', `${FORMS}/${created.formId}:batchUpdate`, { includeFormInResponse: true, requests });
+  const got = questionsOf(updated.form);
+  if (got.length !== spec.questions.length + 1) throw new Error('설문 퀴즈에 문항을 넣었지만 문항 번호를 돌려받지 못했습니다. 드라이브에 만들어진 설문지를 확인하세요.');
+  const publicLink = await openToResponders(token, created.formId, f);
+  return {
+    form_id: created.formId,
+    responder_uri: String(updated.form?.responderUri ?? created.responderUri ?? ''),
+    name_qid: got[0]!.question_id,
+    qids: Object.fromEntries(spec.questions.map((q, i) => [q.id, got[i + 1]!.question_id])),
+    public_link: publicLink,
+  };
+}
+
+/** 응답 받기 켜기·끄기. 옛 설문지 등으로 안 되면 false(교사가 설문지에서 직접 끄도록 알린다). */
+export async function setAcceptingResponses(token: string, formId: string, accepting: boolean, f: Fetch = fetch): Promise<boolean> {
+  try {
+    await call(f, token, 'POST', `${FORMS}/${formId}:setPublishSettings`, {
+      publishSettings: { publishState: { isPublished: true, isAcceptingResponses: accepting } },
+      updateMask: 'publishState.isAcceptingResponses',
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }

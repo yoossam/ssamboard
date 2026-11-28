@@ -20,6 +20,10 @@ import { FilesService } from '../../api/src/files/files.service';
 import { MenusService } from '../../api/src/menus/menus.service';
 import { SharesController } from '../../api/src/shares/shares.controller';
 import { SharesService } from '../../api/src/shares/shares.service';
+import { QuizzesController } from '../../api/src/quizzes/quizzes.controller';
+import { QuizzesService } from '../../api/src/quizzes/quizzes.service';
+import { TuildersController } from '../../api/src/tuilders/tuilders.controller';
+import { TuildersService } from '../../api/src/tuilders/tuilders.service';
 import { NotificationsService } from '../../api/src/notifications/notifications.service';
 import { TablesController } from '../../api/src/tables/tables.controller';
 import { TablesService } from '../../api/src/tables/tables.service';
@@ -53,11 +57,14 @@ export async function ensureLocalUser(db: LocalDb, who: LocalIdentity): Promise<
     // 자동 잠금은 끈다(0분) — 이 트랙의 문은 구글 로그인과 기기 자체 잠금이다.
     user = (await db.one<UserRow>("insert into users(email, name, lock_minutes, pin_hash) values ($1, $2, 0, 'local') returning *", [who.email.toLowerCase(), who.name]))!;
   } else if (who.email && user.email !== who.email.toLowerCase()) {
-    user = (await db.one<UserRow>('update users set email = $2, name = coalesce(nullif($3, \'\'), name) where id = $1 returning *', [user.id, who.email.toLowerCase(), who.name]))!;
+    user = (await db.one<UserRow>("update users set email = $2, name = coalesce(nullif($3, ''), name) where id = $1 returning *", [user.id, who.email.toLowerCase(), who.name]))!;
   }
   let session = await db.one<SessionRow>('select * from sessions where token_hash = $1', [SESSION_TOKEN]);
   if (!session) {
-    session = (await db.one<SessionRow>("insert into sessions(token_hash, user_id, device_name, locked, expires_at) values ($1, $2, '이 브라우저', false, now() + interval '100 years') returning *", [SESSION_TOKEN, user.id]))!;
+    session = (await db.one<SessionRow>("insert into sessions(token_hash, user_id, device_name, locked, expires_at) values ($1, $2, '이 브라우저', false, now() + interval '100 years') returning *", [
+      SESSION_TOKEN,
+      user.id,
+    ]))!;
   }
   return { user, session };
 }
@@ -80,15 +87,18 @@ export async function createLocalApp(db: LocalDb, who: LocalIdentity, opts: Loca
   const shares = new SharesService(anyDb, items, tables, connectors);
   const memory = new MemoryService(anyDb);
   const files = new FilesService(anyDb);
-  const commands = new CommandsService(anyDb, boards, items, tables, notifications, connectors, menus, shares, memory, files);
-  const ai = new AiService(anyDb, llm, commands, boards, items, tables, notifications, menus, shares, memory, files);
+  const quizzes = new QuizzesService(anyDb, connectors);
+  const commands = new CommandsService(anyDb, boards, items, tables, notifications, connectors, menus, shares, memory, files, quizzes);
+  const ai = new AiService(anyDb, llm, commands, boards, items, tables, notifications, menus, shares, memory, files, quizzes, new TuildersService());
   const auth = new AuthService();
   // 파일로 표 만들기: 올린 파일은 이 탭의 메모리(shim/node-fs.ts)에 표를 만들 때까지만 둔다.
   const uploads = new UploadsService(anyDb, llm, tables);
 
   /** 매 요청마다 세션이 가리키는 사용자를 새로 읽는다(설정 변경·자료 받기로 사용자가 바뀌어도 맞게). */
   const authCtx = async (): Promise<AuthCtx> => {
-    const user = (await db.one<UserRow>('select u.* from users u join sessions s on s.user_id = u.id where s.id = $1', [session.id])) ?? (await db.one<UserRow>('select * from users order by created_at limit 1'));
+    const user =
+      (await db.one<UserRow>('select u.* from users u join sessions s on s.user_id = u.id where s.id = $1', [session.id])) ??
+      (await db.one<UserRow>('select * from users order by created_at limit 1'));
     if (!user) throw new BadRequestException('보드 자료가 비어 있습니다. 새로 고쳐 주세요.');
     return { user, session: { ...session, user_id: user.id }, locked: false, ip: 'local' };
   };
@@ -127,7 +137,16 @@ export async function createLocalApp(db: LocalDb, who: LocalIdentity, opts: Loca
     }
     @Get('sessions')
     async sessions() {
-      return [{ id: session.id, device_name: '이 브라우저', user_agent: typeof navigator === 'undefined' ? '' : navigator.userAgent, last_active_at: new Date().toISOString(), created_at: session.created_at, current: true }];
+      return [
+        {
+          id: session.id,
+          device_name: '이 브라우저',
+          user_agent: typeof navigator === 'undefined' ? '' : navigator.userAgent,
+          last_active_at: new Date().toISOString(),
+          created_at: session.created_at,
+          current: true,
+        },
+      ];
     }
     @Delete('sessions/:id')
     revoke(@Param('id') _id: string) {
@@ -167,6 +186,8 @@ export async function createLocalApp(db: LocalDb, who: LocalIdentity, opts: Loca
       new MemoryController(memory),
       new FilesController(files),
       new SharesController(shares, audit),
+      new QuizzesController(quizzes),
+      new TuildersController(new TuildersService()),
     ],
     authCtx,
     opts.onChange,

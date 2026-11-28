@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { HttpException, Injectable } from '@nestjs/common';
 import {
   BLOCK_LABEL,
   BLOCK_TYPES,
@@ -6,13 +6,16 @@ import {
   GRID_COLS,
   GRID_MAX_H,
   placeBlock,
+  linksSignature,
   type BlockDto,
   type BlockType,
   type BoardDto,
   type GridPos,
   type PlaceHint,
+  type BoardKind,
   type BoardTheme,
 } from '@jarvis/shared';
+import { boardKind } from '../common/board-context';
 import { bad } from '../common/http';
 import { Db, json, type Queryable } from '../db/db.service';
 
@@ -27,6 +30,15 @@ export interface NewBlock {
   hint?: PlaceHint | null;
 }
 
+const CLASS_BOARD_HELLO = [
+  '수업 중에 아래 입력줄에 바로 시키세요.',
+  '',
+  '· "분수의 덧셈 퀴즈 5문제 만들어" → 문항·정답을 확인하고 [퀴즈 시작] → 크게 뜬 학생 주소로 학생이 답합니다(로그인 없이 번호·별명)',
+  '· 응답이 들어오면 문항별 정답률이 막대로 보이고, 마감 뒤 [AI 정리]로 다시 설명할 점을 받습니다.',
+  '',
+  '이 메모는 지워도 됩니다. 위쪽 [업무 | 수업]으로 보드를 오갑니다(기기마다 따로).',
+].join('\n');
+
 export function checkLayout(v: any): GridPos {
   const ok = (n: unknown, min: number, max: number) => typeof n === 'number' && Number.isInteger(n) && n >= min && n <= max;
   if (!v || !ok(v.x, 0, GRID_COLS - 1) || !ok(v.y, 0, 10_000) || !ok(v.w, 1, GRID_COLS) || !ok(v.h, 1, GRID_MAX_H) || v.x + v.w > GRID_COLS) bad('블록 위치가 잘못됐습니다.');
@@ -37,24 +49,29 @@ export function checkLayout(v: any): GridPos {
 export class BoardsService {
   constructor(private readonly db: Db) {}
 
-  /** MVP는 보드 1개. 처음 들어오면 기본 블록(일정·할 일·알림·메모)이 놓인 보드를 만든다. */
-  async currentBoard(userId: string, q: Queryable = this.db): Promise<{ id: string; name: string; theme: BoardTheme }> {
-    const existing = await q.one('select id, name, theme from boards where user_id = $1 order by created_at limit 1', [userId]);
+  /**
+   * 지금 요청이 보는 보드(업무·수업 — common/board-context.ts). 없으면 만든다.
+   * 업무 보드는 기본 블록(일정·할 일·알림·메모), 수업 보드는 쓰는 법을 적은 메모 하나로 시작한다.
+   */
+  async currentBoard(userId: string, q: Queryable = this.db, kind: BoardKind = boardKind()): Promise<{ id: string; name: string; kind: BoardKind; theme: BoardTheme }> {
+    const sql = 'select id, name, kind, theme from boards where user_id = $1 and kind = $2';
+    const existing = await q.one(sql, [userId, kind]);
     if (existing) return existing;
     // 처음 들어와 화면이 동시에 여러 요청을 보내도 보드는 하나만(사용자별 잠금 뒤 다시 본다 — 제미나이 검토)
     const make = async (t: Queryable) => {
       await t.query("select pg_advisory_xact_lock(hashtext('board:' || $1::text))", [userId]);
-      const again = await t.one('select id, name, theme from boards where user_id = $1 order by created_at limit 1', [userId]);
+      const again = await t.one(sql, [userId, kind]);
       if (again) return again;
-      const board = (await t.one('insert into boards(user_id) values ($1) returning id, name, theme', [userId]))!;
-      for (const type of ['events', 'tasks', 'notifications', 'memo'] as BlockType[]) await this.createBlock(userId, { type }, t, null, board.id);
+      const board = (await t.one('insert into boards(user_id, kind, name) values ($1, $2, $3) returning id, name, kind, theme', [userId, kind, kind === 'class' ? '수업 보드' : '내 보드']))!;
+      if (kind === 'class') await this.createBlock(userId, { type: 'memo', title: '수업 보드 쓰는 법', config: { text: CLASS_BOARD_HELLO }, layout_lg: { x: 0, y: 0, w: 8, h: 6 } }, t, null, board.id);
+      else for (const type of ['events', 'tasks', 'notifications', 'memo'] as BlockType[]) await this.createBlock(userId, { type }, t, null, board.id);
       return board;
     };
     return q === this.db ? this.db.tx(make) : make(q);
   }
 
-  async listBlocks(userId: string, q: Queryable = this.db): Promise<BlockDto[]> {
-    const board = await this.currentBoard(userId, q);
+  async listBlocks(userId: string, q: Queryable = this.db, kind: BoardKind = boardKind()): Promise<BlockDto[]> {
+    const board = await this.currentBoard(userId, q, kind);
     return q.query<BlockDto>(`select ${BLOCK_COLUMNS} from blocks where board_id = $1 and user_id = $2 and deleted_at is null order by created_at`, [board.id, userId]);
   }
 
@@ -124,6 +141,16 @@ export class BoardsService {
         patch.layout_lg === undefined ? null : json(checkLayout(patch.layout_lg)),
       ],
     );
+  }
+
+  /** 수업 자료 목록 저장 — 화면이 읽었던 목록(base)과 지금이 다르면 409(다른 기기가 먼저 고침) */
+  async updateLinks(userId: string, id: string, items: unknown[], base: string): Promise<BlockDto | null> {
+    return this.db.tx(async (q) => {
+      const cur = await q.one<{ config: Record<string, any> }>("select config from blocks where id = $1 and user_id = $2 and deleted_at is null and type = 'links' for update", [id, userId]);
+      if (!cur) return null;
+      if (linksSignature(cur.config.items ?? []) !== base) throw new HttpException('다른 곳에서 이 자료 목록을 먼저 고쳤습니다. 새로 읽은 뒤 다시 해 주세요.', 409);
+      return this.updateBlock(userId, id, { config: { items } }, q);
+    });
   }
 
   /** 삭제는 휴지통으로 보낸다(30일 보관). */

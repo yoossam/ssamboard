@@ -1,9 +1,20 @@
+import { boardKind } from '../common/board-context';
 import { config } from '../config';
+import { QuizzesService, quizAvailable } from '../quizzes/quizzes.service';
 import { Injectable } from '@nestjs/common';
 import {
   BLOCK_LABEL,
   BLOCK_TYPES,
   checkFormSpec,
+  checkQuizSpec,
+  checkLinkItems,
+  LINK_KIND_LABEL,
+  LINKS_MAX,
+  answerLabel,
+  QUIZ_DEFAULT_MINUTES,
+  type QuizSpec,
+  type BoardKind,
+  boardKindOf,
   checkViewData,
   findColumn,
   MAX_EXTRACT_ROWS,
@@ -72,9 +83,9 @@ export interface StoredStep {
   preview?: TablePreview;
 }
 
-type Entity = 'tasks' | 'events' | 'blocks' | 'data_tables' | 'notifications' | 'menu_items' | 'shares' | 'memories';
+type Entity = 'tasks' | 'events' | 'blocks' | 'data_tables' | 'notifications' | 'menu_items' | 'shares' | 'memories' | 'quizzes';
 /** 되돌리기 SQL 에 표 이름으로 들어가는 값 — 기록은 가져오기 파일에서 올 수도 있어 이 목록만 받는다(2026-11-27 코덱스 검토). */
-const ENTITIES: readonly string[] = ['tasks', 'events', 'blocks', 'data_tables', 'notifications', 'menu_items', 'shares', 'memories'];
+const ENTITIES: readonly string[] = ['tasks', 'events', 'blocks', 'data_tables', 'notifications', 'menu_items', 'shares', 'memories', 'quizzes'];
 type Change =
   | { kind: 'created'; entity: Entity; id: string; label: string }
   | {
@@ -174,6 +185,7 @@ export class CommandsService {
     private readonly shares: SharesService,
     private readonly memory: MemoryService,
     private readonly files: FilesService,
+    private readonly quizzes: QuizzesService,
   ) {}
 
   /** 화면 블록이 받을 자료 정의를 확인한다. 표 자료면 그 표가 이 사용자의 것인지와 query까지 본다. */
@@ -284,6 +296,7 @@ export class CommandsService {
       }
       case 'create_block': {
         if (!BLOCK_TYPES.includes(input.type)) return fail(`type은 ${BLOCK_TYPES.join(', ')} 중 하나입니다.`);
+        if (input.type === 'quiz') return fail('퀴즈 블록은 create_quiz 로 만듭니다.');
         const type = input.type as BlockType;
         if (type === 'view') {
           if (input.text !== undefined || input.table_id !== undefined || input.query !== undefined || input.color !== undefined)
@@ -480,6 +493,58 @@ export class CommandsService {
           },
         };
       }
+      case 'add_links': {
+        const checked = checkLinkItems(input.items);
+        if (!checked.ok) return fail(checked.error);
+        if (checked.items.length === 0) return fail('items 가 비어 있습니다.');
+        // 같은 요청 안에서 겹친 주소도 하나만
+        checked.items = checked.items.filter((it, n, all) => all.findIndex((x) => x.url === it.url) === n);
+        let blockTitle = '';
+        let target: string | null = null;
+        if (input.block_id !== undefined && input.block_id !== null && input.block_id !== '') {
+          if (!isUuid(input.block_id)) return fail('block_id가 잘못됐습니다. get_board로 확인하세요.');
+          const b = await this.boards.getBlock(uid, input.block_id);
+          if (!b || b.type !== 'links') return fail('그런 수업 자료 블록이 없습니다. get_board 에서 type 이 links 인 블록을 확인하거나 block_id 없이 새 블록으로 담으세요.');
+          const old: any[] = Array.isArray(b.config.items) ? b.config.items : [];
+          blockTitle = b.title || '수업 자료';
+          target = b.id;
+          // 이미 담긴 주소는 빼고 담는다
+          const urls = new Set(old.map((x) => String(x?.url)));
+          checked.items = checked.items.filter((it) => !urls.has(it.url));
+          if (checked.items.length === 0) return fail('모두 이미 담긴 주소입니다.');
+          if (old.length + checked.items.length > LINKS_MAX) return fail(`한 블록에 ${LINKS_MAX}개까지입니다(지금 ${old.length}개).`);
+        }
+        const title = text(input.title, 60) || '수업 자료';
+        return {
+          ok: true,
+          step: {
+            tool,
+            input: { block_id: target, title, items: checked.items },
+            title: '수업 자료 담기',
+            detail: `${target ? `"${blockTitle}"에 더함` : `새 블록 "${title}"`} · ${checked.items.length}개\n${checked.items.map((it) => `${it.title} (${LINK_KIND_LABEL[it.kind]}${it.student ? ', 학생에게 보임' : ''}) ${it.url}`).join('\n')}`,
+          },
+        };
+      }
+      case 'create_quiz': {
+        // 방식: 서버 판은 쌤보드 학생 페이지가 기본, 드라이브 판은 구글 설문 퀴즈만(학생이 들어올 서버가 없다)
+        const mode = input.mode === 'google' || !quizAvailable() ? 'google' : 'board';
+        if (input.mode === 'board' && !quizAvailable()) return fail('이 판(구글 드라이브)에서는 쌤보드 퀴즈를 낼 수 없어 구글 설문 퀴즈(mode: google)로만 됩니다.');
+        if (mode === 'google' && !(await this.connectors.googleConnector(uid)))
+          return fail('구글 설문 퀴즈를 만들려면 구글이 연결돼 있어야 합니다. 설정 → 연결에서 Google 을 먼저 연결하라고 안내하세요.');
+        const checked = checkQuizSpec(input);
+        if (!checked.ok) return fail(checked.error);
+        const minutes = Number.isInteger(input.minutes) ? Math.min(720, Math.max(5, input.minutes)) : QUIZ_DEFAULT_MINUTES;
+        const spec = checked.spec;
+        return {
+          ok: true,
+          step: {
+            tool,
+            input: { spec, minutes, mode },
+            title: mode === 'google' ? '구글 설문 퀴즈 만들기' : '퀴즈 만들기',
+            detail: `${spec.title} · ${spec.questions.length}문항 · ${mode === 'google' ? '구글 설문 퀴즈(첫 문항 번호나 별명, 이메일 안 받음, [마감]까지 받음)' : `${minutes}분 뒤 자동 마감`}\n${spec.questions.map((q, i) => `${i + 1}. ${q.text}${q.options ? ` [${q.options.map((o, j) => `${j + 1}) ${o}`).join(' ')}]` : ''} → 정답 ${answerLabel(q)}`).join('\n')}`,
+          },
+        };
+      }
       case 'add_rows': {
         if (!isUuid(input.table_id)) return fail('table_id가 잘못됐습니다. list_tables로 확인하세요.');
         const table = await this.tables.get(uid, input.table_id);
@@ -539,7 +604,7 @@ export class CommandsService {
         } catch (e: any) {
           return fail(String(e?.message ?? e));
         }
-        const count = (await this.db.one<{ n: number }>('select count(*)::int as n from menu_items where user_id = $1', [uid]))!.n;
+        const count = (await this.db.one<{ n: number }>('select count(*)::int as n from menu_items where user_id = $1 and board_kind = $2', [uid, boardKind()]))!.n;
         if (count >= 12) return fail('메뉴는 12개까지입니다. 안 쓰는 메뉴를 먼저 지우자고 사용자에게 제안하세요.');
         const tableName = checked.new_table ? `새 표 "${checked.new_table.name}"(${checked.new_table.columns.map((c) => c.name).join(', ')})` : '';
         const actionText =
@@ -610,7 +675,7 @@ export class CommandsService {
           source_table_id: string | null;
         }>('select title, type, source_table_id from blocks where id = $1 and user_id = $2 and deleted_at is null', [input.block_id, uid]);
         if (!block) return fail('그런 블록이 없습니다. get_board로 다시 확인하세요.');
-        if (!SHAREABLE_BLOCKS.includes(block.type)) return fail('이 블록은 공유할 수 없습니다(할 일·일정·표·메모·AI 결과만).');
+        if (!SHAREABLE_BLOCKS.includes(block.type)) return fail('이 블록은 공유할 수 없습니다(할 일·일정·표·메모·AI 결과·수업 자료만).');
         const days = input.days === undefined ? 30 : Number(input.days);
         if (!(SHARE_DAYS as readonly number[]).includes(days)) return fail(`days 는 ${SHARE_DAYS.join(', ')} 중 하나입니다.`);
         // 숨길 칸은 이름으로 받아 열 id 로 바꾼다(표 블록만)
@@ -716,8 +781,13 @@ export class CommandsService {
     }
   }
 
-  async propose(userId: string, messageId: string | null, steps: StoredStep[]): Promise<CommandDto> {
-    const row = (await this.db.one<{ id: string }>('insert into ai_commands(user_id, message_id, plan) values ($1, $2, $3::jsonb) returning id', [userId, messageId, json(steps)]))!;
+  async propose(userId: string, messageId: string | null, steps: StoredStep[], kind: BoardKind = boardKind()): Promise<CommandDto> {
+    const row = (await this.db.one<{ id: string }>('insert into ai_commands(user_id, message_id, plan, board_kind) values ($1, $2, $3::jsonb, $4) returning id', [
+      userId,
+      messageId,
+      json(steps),
+      kind,
+    ]))!;
     return this.view({
       id: row.id,
       status: 'proposed',
@@ -826,11 +896,15 @@ export class CommandsService {
    * edits로 표 미리보기에서 고친 이름·컬럼을 넘길 수 있다(LLM-4).
    */
   async apply(user: UserRow, id: string, edits: Record<string, { name?: string; columns?: { name: string; type: ColumnType }[] }> = {}): Promise<CommandDto> {
+    // 계획을 만든 때의 보드에 놓는다 — 그 사이 다른 보드로 바꿔도(2026-11-28 두 보드)
+    // 보드 id 를 직접 넘긴다(드라이브 판에는 요청별 문맥이 없어 전역 값에 기대면 겹친 요청에 섞인다 — 코덱스·제미나이 검토)
+    const kind = boardKindOf((await this.db.one<{ board_kind: string }>('select board_kind from ai_commands where id = $1 and user_id = $2', [id, user.id]))?.board_kind);
     // 공유 링크는 바깥 일(구글 문서)도 하고 자료를 다시 읽으므로 트랜잭션이 끝난 뒤 따로 만든다(브라우저 안 DB 는 연결이 하나라 안에서 읽으면 서로 기다린다).
     const later: StoredStep[] = [];
     await this.db.tx(async (q) => {
       const cmd = await q.one<{ plan: StoredStep[] }>(`select plan from ai_commands where id = $1 and user_id = $2 and status = 'proposed' for update`, [id, user.id]);
       if (!cmd) bad('이미 처리했거나 없는 계획입니다.');
+      const boardId = (await this.boards.currentBoard(user.id, q, kind)).id;
       const changes: Change[] = [];
       for (const [index, step] of cmd!.plan.entries()) {
         const edit = edits?.[String(index)];
@@ -846,7 +920,7 @@ export class CommandsService {
           later.push(step);
           continue;
         }
-        changes.push(...(await this.execute(q, user, id, step)));
+        changes.push(...(await this.execute(q, user, id, step, boardId)));
       }
       // applied_at을 마지막에 적는다. 이 뒤에 updated_at이 더 늦어진 항목은 "적용 뒤에 고친 것"이다.
       // 트랜잭션 뒤에 만들 공유 링크가 있으면 그동안 'applying' — 되돌리기는 'applied' 만 받으므로 만드는 사이 되돌려 링크가 새는 일이 없다(코덱스 검토)
@@ -911,7 +985,7 @@ export class CommandsService {
     return this.get(user.id, id);
   }
 
-  private async execute(q: Queryable, user: UserRow, commandId: string, step: StoredStep): Promise<Change[]> {
+  private async execute(q: Queryable, user: UserRow, commandId: string, step: StoredStep, boardId: string): Promise<Change[]> {
     const uid = user.id;
     const i = step.input;
     switch (step.tool) {
@@ -984,6 +1058,7 @@ export class CommandsService {
           },
           q,
           commandId,
+          boardId,
         );
         return [
           {
@@ -1078,6 +1153,7 @@ export class CommandsService {
             },
             q,
             commandId,
+            boardId,
           );
           out.push({
             kind: 'created',
@@ -1110,6 +1186,7 @@ export class CommandsService {
             },
             q,
             commandId,
+            boardId,
           );
           out.push({
             kind: 'created',
@@ -1130,6 +1207,31 @@ export class CommandsService {
           q,
         );
         return out;
+      }
+      case 'add_links': {
+        if (i.block_id) {
+          const before = await q.one<{ title: string; pinned: boolean; layout_lg: GridPos; config: Record<string, any>; updated_at: Date; type: string }>(
+            "select title, pinned, layout_lg, config, updated_at, type from blocks where id = $1 and user_id = $2 and deleted_at is null and type = 'links' for update",
+            [i.block_id, uid],
+          );
+          if (!before) bad('담으려는 수업 자료 블록이 없어졌습니다.');
+          const old: any[] = Array.isArray(before!.config.items) ? before!.config.items : [];
+          const urls = new Set(old.map((x) => String(x?.url)));
+          const merged = checkLinkItems([...old, ...i.items.filter((x: any) => !urls.has(String(x?.url)))]);
+          if (!merged.ok) bad(merged.error);
+          await this.boards.updateBlock(uid, i.block_id, { config: { items: merged.items } }, q);
+          return [{ kind: 'updated', entity: 'blocks', id: i.block_id, label: `블록 "${before!.title}"`, before: before! }];
+        }
+        const b = await this.boards.createBlock(uid, { type: 'links', title: i.title, config: { items: i.items } }, q, commandId, boardId);
+        return [{ kind: 'created', entity: 'blocks', id: b.id, label: `블록 "${b.title}"` }];
+      }
+      case 'create_quiz': {
+        const quiz = await this.quizzes.create(uid, i.spec as QuizSpec, q, commandId, i.minutes, i.mode === 'google' ? 'google' : 'board');
+        const b = await this.boards.createBlock(uid, { type: 'quiz', title: quiz.title, config: { quiz_id: quiz.id } }, q, commandId, boardId);
+        return [
+          { kind: 'created', entity: 'quizzes', id: quiz.id, label: `퀴즈 "${quiz.title}"` },
+          { kind: 'created', entity: 'blocks', id: b.id, label: `블록 "${b.title}"` },
+        ];
       }
       case 'add_rows': {
         const table = await this.tables.require(uid, i.table_id, q);
@@ -1159,7 +1261,9 @@ export class CommandsService {
         }));
       }
       case 'create_menu': {
-        const { made, tables } = await this.menus.createIn(q, uid, [i], commandId);
+        // 계획을 만든 보드의 메뉴로(보드마다 따로)
+        const menuKind = boardKindOf((await q.one<{ kind: string }>('select kind from boards where id = $1', [boardId]))?.kind);
+        const { made, tables } = await this.menus.createIn(q, uid, [i], commandId, menuKind);
         const out: Change[] = tables.map((t) => ({
           kind: 'created' as const,
           entity: 'data_tables' as const,
@@ -1199,7 +1303,10 @@ export class CommandsService {
         ];
       }
       case 'delete_menu': {
-        const before = await q.one<MenuItemDto & { updated_at: Date }>('select id, position, label, icon, description, action, updated_at from menu_items where id = $1 and user_id = $2', [i.id, uid]);
+        const before = await q.one<MenuItemDto & { updated_at: Date }>('select id, position, label, icon, description, action, updated_at, board_kind from menu_items where id = $1 and user_id = $2', [
+          i.id,
+          uid,
+        ]);
         if (!before) bad('지우려는 메뉴가 없어졌습니다.');
         await q.query('delete from menu_items where id = $1 and user_id = $2', [i.id, uid]);
         return [
@@ -1304,6 +1411,20 @@ export class CommandsService {
           if (change.kind === 'created') revokeLater.push({ id: change.id, label: change.label });
           continue;
         }
+        // 퀴즈: 학생 응답이 들어왔으면 지우지 않는다(되돌리기로 학생 답이 사라지지 않게), 없으면 지운다
+        if (change.entity === 'quizzes') {
+          // 학생 제출과 차례를 세운다(제출도 이 줄을 잠근다) — 0개를 본 뒤 들어온 답이 지운 퀴즈에 남지 않게
+          await q.query('select id from quizzes where id = $1 and user_id = $2 for update', [change.id, uid]);
+          const n = (await q.one<{ n: number }>('select count(*)::int as n from quiz_responses where quiz_id = $1 and user_id = $2', [change.id, uid]))?.n ?? 0;
+          const google = (await q.one<{ source: string }>('select source from quizzes where id = $1 and user_id = $2', [change.id, uid]))?.source === 'google';
+          if (google && n === 0) skipped.push(`${change.label}의 구글 설문지(드라이브에 남음 — 필요 없으면 드라이브에서 지우세요)`);
+          if (n > 0) {
+            skipped.push(`${change.label}(학생 응답 ${n}개가 있어 퀴즈와 블록을 남겨 둠 — 블록에서 마감하세요)`);
+            // 앞서(거꾸로 도는 차례) 휴지통으로 간 이 퀴즈의 블록을 되살린다
+            await q.query("update blocks set deleted_at = null where user_id = $1 and type = 'quiz' and config->>'quiz_id' = $2 and command_id = $3", [uid, change.id, id]);
+          } else await q.query('update quizzes set deleted_at = now(), updated_at = now() where id = $1 and user_id = $2', [change.id, uid]);
+          continue;
+        }
         if (change.entity === 'memories') {
           if (change.kind === 'created' && (await touchedLater('memories', change.id))) {
             skipped.push(`${change.label}(적용 뒤에 고침)`);
@@ -1323,12 +1444,12 @@ export class CommandsService {
           else if (change.kind === 'deleted') {
             const b = change.before!;
             await q.query(
-              'insert into menu_items(id, user_id, position, label, icon, description, action, updated_at) values ($1, $2, $3, $4, $5, $6, $7::jsonb, coalesce($8::timestamptz, now())) on conflict (id) do nothing',
-              [change.id, uid, b.position, b.label, b.icon, b.description, json(b.action), b.updated_at ?? null],
+              'insert into menu_items(id, user_id, position, label, icon, description, action, updated_at, board_kind) values ($1, $2, $3, $4, $5, $6, $7::jsonb, coalesce($8::timestamptz, now()), $9) on conflict (id) do nothing',
+              [change.id, uid, b.position, b.label, b.icon, b.description, json(b.action), b.updated_at ?? null, boardKindOf(b.board_kind)],
             );
             // 자리가 겹치지 않게 순서를 다시 매긴다
             await q.query(
-              `update menu_items m set position = o.n from (select id, row_number() over (order by position, created_at) - 1 as n from menu_items where user_id = $1) o where m.id = o.id`,
+              `update menu_items m set position = o.n from (select id, row_number() over (partition by board_kind order by position, created_at) - 1 as n from menu_items where user_id = $1) o where m.id = o.id`,
               [uid],
             );
           } else {

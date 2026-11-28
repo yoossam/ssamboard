@@ -2,6 +2,7 @@ import { keepPreviousData, QueryClient, useQuery } from '@tanstack/react-query';
 import type { BoardDto, CommandDto, ConnectorDto, MenuItemDto, EventDto, NotificationDto, QueryResult, RowPage, SessionDto, SettingsDto, TableDto, TaskDto, TrashItem } from '@jarvis/shared';
 import { api, ApiError } from './api';
 import { dayKey, zoneOffset } from './format';
+import { useApp } from './store';
 
 // 서버 데이터 읽기. 자동 새로고침은 활동 신호가 아니므로 잠금 시간을 늘리지 않는다(AUTH-5).
 
@@ -36,7 +37,14 @@ export function refresh(...names: (keyof typeof keys | 'rows' | 'query')[]): Pro
   return Promise.all(names.map((n) => queryClient.invalidateQueries({ queryKey: n === 'rows' || n === 'query' ? [n] : keys[n] })));
 }
 
-export const useBoard = () => useQuery({ queryKey: keys.board, queryFn: () => api.get<BoardDto>('/boards/current') });
+/** 지금 보고 있는 보드의 캐시 열쇠(setQueryData·getQueryData 용) */
+export const boardKey = () => [...keys.board, useApp.getState().boardKind] as const;
+
+/** 지금 보드(업무·수업). 열쇠에 보드 종류를 넣어 두 보드를 따로 담아 둔다(바꿀 때 다른 보드가 잠깐 보이지 않게). */
+export const useBoard = () => {
+  const kind = useApp((s) => s.boardKind);
+  return useQuery({ queryKey: [...keys.board, kind], queryFn: () => api.get<BoardDto>('/boards/current') });
+};
 export const useTasks = () => useQuery({ queryKey: keys.tasks, queryFn: () => api.get<TaskDto[]>('/tasks') });
 
 /** 오늘부터 한 달 동안의 일정(블록마다 보여 줄 기간은 block.config.event_days 로 거른다). */
@@ -56,7 +64,11 @@ export const useTables = () => useQuery({ queryKey: keys.tables, queryFn: () => 
 export const useSettings = () => useQuery({ queryKey: keys.settings, queryFn: () => api.get<SettingsDto>('/settings') });
 export const useSessions = () => useQuery({ queryKey: keys.sessions, queryFn: () => api.get<SessionDto[]>('/sessions') });
 export const useConnectors = () => useQuery({ queryKey: keys.connectors, queryFn: () => api.get<ConnectorDto[]>('/connectors') });
-export const useMenus = () => useQuery({ queryKey: keys.menus, queryFn: () => api.get<MenuItemDto[]>('/menus') });
+/** 지금 보드의 내 메뉴(보드마다 따로 — 열쇠에 보드 종류를 넣는다) */
+export const useMenus = () => {
+  const kind = useApp((s) => s.boardKind);
+  return useQuery({ queryKey: [...keys.menus, kind], queryFn: () => api.get<MenuItemDto[]>('/menus') });
+};
 /** 처리 결과함(승인 대기·처리한 것) */
 export const useCommands = () => useQuery({ queryKey: keys.commands, queryFn: () => api.get<CommandDto[]>('/ai/commands'), refetchInterval: 120_000 });
 export const useTrash = () => useQuery({ queryKey: keys.trash, queryFn: () => api.get<TrashItem[]>('/trash') });

@@ -1,4 +1,4 @@
-import type { AuthStatus } from '@jarvis/shared';
+import { boardKindOf, type AuthStatus, type BoardKind } from '@jarvis/shared';
 import type { AttachedFile, AttachedImage, AttachedLink } from './images';
 import { create } from 'zustand';
 
@@ -20,7 +20,9 @@ export type Panel =
   | { kind: 'share'; blockId: string }
   | { kind: 'task'; taskId?: string }
   | { kind: 'event'; eventId?: string }
-  | { kind: 'results' };
+  | { kind: 'results' }
+  | { kind: 'quiz'; quizId: string }
+  | { kind: 'tuilders'; blockId: string };
 
 export type SettingsTab = 'general' | 'menu' | 'memory' | 'security' | 'connect' | 'devices' | 'drive' | 'data';
 export type AiLayout = 'modal' | 'panel';
@@ -55,6 +57,8 @@ interface AppState {
   /** 방금 바뀐 블록 — 잠깐 강조한다(승인 뒤 바뀐 곳 보기, 2026-11-28 UX 토론 J) */
   highlight: string[];
   toasts: Toast[];
+  /** 지금 보는 보드(업무·수업) — 기기마다 기억한다(2026-11-28 두 보드). 서버에는 요청마다 X-Board 로 알린다. */
+  boardKind: BoardKind;
 
   setStatus: (status: AuthStatus | null) => void;
   setOffline: (offline: boolean) => void;
@@ -78,6 +82,7 @@ interface AppState {
   toggleSelected: (blockId: string) => void;
   clearSelected: () => void;
   flash: (blockIds: string[]) => void;
+  setBoardKind: (kind: BoardKind) => void;
   toast: (text: string, tone?: Toast['tone']) => void;
   dropToast: (id: number) => void;
 }
@@ -87,6 +92,14 @@ function savedLayout(): AiLayout {
     return localStorage.getItem('jarvis.aiLayout') === 'panel' ? 'panel' : 'modal';
   } catch {
     return 'modal';
+  }
+}
+
+function savedBoard(): BoardKind {
+  try {
+    return boardKindOf(localStorage.getItem('jarvis.board'));
+  } catch {
+    return 'work';
   }
 }
 
@@ -105,6 +118,7 @@ export const useApp = create<AppState>()((set, get) => ({
   selected: [],
   highlight: [],
   toasts: [],
+  boardKind: savedBoard(),
 
   setStatus: (status) => set(status?.authenticated && !status.locked ? { status, lockReason: null } : { status }),
   setOffline: (offline) => set({ offline }),
@@ -165,6 +179,15 @@ export const useApp = create<AppState>()((set, get) => ({
     set({ highlight });
     clearTimeout(flashTimer);
     flashTimer = setTimeout(() => set({ highlight: [] }), 4000);
+  },
+  setBoardKind: (boardKind) => {
+    try {
+      localStorage.setItem('jarvis.board', boardKind);
+    } catch {
+      /* 저장하지 못해도 이번 화면에서는 바뀐다. */
+    }
+    // 다른 보드의 블록을 고른 채로 두지 않는다
+    set({ boardKind, selected: [], highlight: [], editMode: false, panels: [] });
   },
   toast: (text, tone = 'ok') => {
     const id = ++toastSeq;

@@ -24,6 +24,10 @@ import { FilesService } from './files/files.service';
 import { MemoryService } from './memory/memory.service';
 import { MenusService } from './menus/menus.service';
 import { PublicShareController, SharesController } from './shares/shares.controller';
+import { PublicQuizController, QuizzesController } from './quizzes/quizzes.controller';
+import { QuizzesService } from './quizzes/quizzes.service';
+import { TuildersController } from './tuilders/tuilders.controller';
+import { TuildersService } from './tuilders/tuilders.service';
 import { SharesService } from './shares/shares.service';
 import { TablesController } from './tables/tables.controller';
 import { TablesService } from './tables/tables.service';
@@ -52,6 +56,9 @@ import { WorkerService } from './worker/worker.service';
     FilesController,
     SharesController,
     PublicShareController,
+    QuizzesController,
+    PublicQuizController,
+    TuildersController,
   ],
   providers: [
     Db,
@@ -71,6 +78,8 @@ import { WorkerService } from './worker/worker.service';
     MemoryService,
     FilesService,
     SharesService,
+    QuizzesService,
+    TuildersService,
     WorkerService,
     { provide: APP_GUARD, useClass: SessionGuard },
   ],

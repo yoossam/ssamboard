@@ -26,6 +26,7 @@ export const FILE_REDIRECTS = {
   'common/crypto.ts': join(SRC, 'shim', 'crypto.ts'),
   'auth/google.service.ts': join(SRC, 'stub', 'google.ts'),
   'auth/auth.service.ts': join(SRC, 'stub', 'auth.ts'),
+  'common/board-context.ts': join(SRC, 'shim', 'board-context.ts'),
 };
 
 const fileMap = new Map(Object.entries(FILE_REDIRECTS).map(([k, v]) => [normalize(join(API_SRC, k)), v]));

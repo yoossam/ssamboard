@@ -1,3 +1,4 @@
+import { QrCode } from '../components/QrCode';
 /*
  * 공유 링크 창(2026-11-28): 블록 하나를 로그인 없이 보는 읽기 전용 링크로. 서버 트랙은 늘 지금 내용(/s/…),
  * 구글 드라이브 트랙은 구글 문서(만든 때 내용, '다시 올리기'). 서버 쪽은 apps/api/src/shares.
@@ -85,10 +86,13 @@ export function SharePanel({ blockId }: { blockId: string }) {
         </p>
 
         {!shareable ? (
-          <Notice tone="danger">이 블록은 공유할 수 없습니다. 할 일·일정·표·메모·AI 결과 블록만 공유됩니다.</Notice>
+          <Notice tone="danger">이 블록은 공유할 수 없습니다. 할 일·일정·표·메모·AI 결과·수업 자료 블록만 공유됩니다.</Notice>
         ) : made ? (
           <div className="space-y-2 rounded-xl border border-accent bg-tint p-3">
             <p className="text-sm font-bold">링크를 만들고 복사했습니다</p>
+            <div className="flex justify-center py-1">
+              <QrCode text={made.url} size={180} label="공유 링크 QR 코드" />
+            </div>
             <div className="flex items-center gap-2">
               <input className={`${inputClass} h-10 font-mono text-xs`} readOnly value={made.url} onFocus={(e) => e.target.select()} />
               <Button icon="paste" className="shrink-0" onClick={() => copy(made.url)}>

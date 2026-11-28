@@ -10,3 +10,6 @@ export * from './menu';
 export * from './share';
 export * from './blockview';
 export * from './memory';
+export * from './quiz';
+export * from './links';
+export * from './qr';

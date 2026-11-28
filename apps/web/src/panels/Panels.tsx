@@ -1,3 +1,5 @@
+import { TuildersPanel } from '../board/links';
+import { QuizScreen } from '../board/quiz';
 import { useState, type ReactNode, type CSSProperties } from 'react';
 import { ResultsPanel } from './Results';
 import {
@@ -153,6 +155,12 @@ function AddBlockPanel() {
   const add = async (type: BlockType) => {
     if (type === 'table') return replace({ kind: 'tables' });
     // AI 화면은 AI가 그려 주는 블록이다. AI 창을 열어 무엇을 보여 줄지 말하게 한다.
+    // 퀴즈는 AI 가 문제를 내 준다(수업 보드)
+    if (type === 'quiz') {
+      close();
+      useApp.getState().openAi();
+      return toast('어떤 퀴즈를 낼지 말해 주세요. 예: 분수의 덧셈 퀴즈 5문제 만들어');
+    }
     if (type === 'view') {
       close();
       useApp.getState().openAi();
@@ -617,6 +625,10 @@ function PanelView({ panel }: { panel: Panel }) {
       return <SettingsPanel initialTab={panel.tab} />;
     case 'results':
       return <ResultsPanel />;
+    case 'quiz':
+      return <QuizScreen quizId={panel.quizId} />;
+    case 'tuilders':
+      return <TuildersPanel blockId={panel.blockId} />;
     default:
       return null;
   }
@@ -641,6 +653,8 @@ export function PanelHost() {
               ? top.connectorId
               : 'tab' in top
                 ? top.tab
-                : '';
+                : 'quizId' in top
+                  ? top.quizId
+                  : '';
   return <PanelView key={`${panels.length}:${top.kind}:${id ?? ''}`} panel={top} />;
 }

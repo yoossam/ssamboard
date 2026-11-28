@@ -23,8 +23,10 @@ export interface TableSchema {
   columns: Column[];
 }
 
-export type BlockType = 'tasks' | 'events' | 'table' | 'memo' | 'ai_result' | 'notifications' | 'view';
-export const BLOCK_TYPES: BlockType[] = ['tasks', 'events', 'table', 'memo', 'ai_result', 'notifications', 'view'];
+/** menu(2026-11-28): 내 메뉴를 이름 단추로 모은 블록 — 보드에 하나 있으면 위쪽 바로가기 줄은 숨긴다. */
+export type BlockType = 'tasks' | 'events' | 'table' | 'memo' | 'ai_result' | 'notifications' | 'view' | 'menu' | 'quiz' | 'links';
+/** quiz(2026-11-28): 즉석 퀴즈 하나(QR·응답 수·문항별 막대). config.quiz_id. AI 의 create_quiz 가 만들고, 사람이 '블록 추가'로 놓지는 않는다. */
+export const BLOCK_TYPES: BlockType[] = ['tasks', 'events', 'table', 'memo', 'ai_result', 'notifications', 'view', 'menu', 'quiz', 'links'];
 export const BLOCK_LABEL: Record<BlockType, string> = {
   tasks: '할 일',
   events: '오늘 일정',
@@ -33,6 +35,9 @@ export const BLOCK_LABEL: Record<BlockType, string> = {
   ai_result: 'AI 결과',
   notifications: '알림',
   view: 'AI 화면',
+  menu: '내 메뉴',
+  quiz: '퀴즈',
+  links: '수업 자료',
 };
 
 export interface GridPos {
@@ -50,6 +55,9 @@ export const DEFAULT_BLOCK_SIZE: Record<BlockType, { w: number; h: number }> = {
   ai_result: { w: 6, h: 8 },
   memo: { w: 5, h: 6 },
   view: { w: 8, h: 8 },
+  menu: { w: 6, h: 4 },
+  quiz: { w: 10, h: 9 },
+  links: { w: 8, h: 7 },
 };
 /** 줄일 수 있는 가장 작은 크기. 메모는 붙임쪽지처럼 작게도 쓴다. */
 export const MIN_BLOCK_SIZE: Record<BlockType, { w: number; h: number }> = {
@@ -60,6 +68,9 @@ export const MIN_BLOCK_SIZE: Record<BlockType, { w: number; h: number }> = {
   ai_result: { w: 4, h: 4 },
   memo: { w: 2, h: 2 },
   view: { w: 4, h: 4 },
+  menu: { w: 3, h: 2 },
+  quiz: { w: 5, h: 5 },
+  links: { w: 4, h: 3 },
 };
 
 /** 메모(붙임쪽지) 색 이름. 실제 색 값은 화면의 styles.css 에 있다. 블록 config.color 에 담는다. */
@@ -77,7 +88,14 @@ export const memoColor = (v: unknown): MemoColor => ((MEMO_COLORS as readonly un
 export const TITLE_COLORS = ['default', 'blue', 'purple', 'pink', 'red', 'orange', 'green', 'teal'] as const;
 export type TitleColor = (typeof TITLE_COLORS)[number];
 export const TITLE_COLOR_LABEL: Record<TitleColor, string> = {
-  default: '기본', blue: '파랑', purple: '보라', pink: '분홍', red: '빨강', orange: '주황', green: '초록', teal: '청록',
+  default: '기본',
+  blue: '파랑',
+  purple: '보라',
+  pink: '분홍',
+  red: '빨강',
+  orange: '주황',
+  green: '초록',
+  teal: '청록',
 };
 export const titleColor = (v: unknown): TitleColor => ((TITLE_COLORS as readonly unknown[]).includes(v) ? (v as TitleColor) : 'default');
 /** 메모가 아닌 블록의 바탕. 처음은 흰색. */
@@ -88,7 +106,14 @@ export const blockBg = (block: { type: string; config: Record<string, any> }): M
 export const BOARD_BGS = ['gray', 'white', 'cream', 'mint', 'sky', 'lavender', 'peach', 'slate'] as const;
 export type BoardBg = (typeof BOARD_BGS)[number];
 export const BOARD_BG_LABEL: Record<BoardBg, string> = {
-  gray: '기본', white: '흰색', cream: '크림', mint: '민트', sky: '하늘', lavender: '라벤더', peach: '복숭아', slate: '어두운 회색',
+  gray: '기본',
+  white: '흰색',
+  cream: '크림',
+  mint: '민트',
+  sky: '하늘',
+  lavender: '라벤더',
+  peach: '복숭아',
+  slate: '어두운 회색',
 };
 export const boardBg = (v: unknown): BoardBg => ((BOARD_BGS as readonly unknown[]).includes(v) ? (v as BoardBg) : 'gray');
 export interface BoardTheme {
@@ -105,9 +130,19 @@ export interface BlockDto {
   config: Record<string, any>;
   source_table_id: string | null;
 }
+/**
+ * 두 보드(2026-11-28 선생님): 업무 보드와 수업 보드. 어느 보드를 보는지는 기기마다(화면이 X-Board 머리글로 보낸다 — 세 모델 합의:
+ * 교실 TV 에 수업 보드를 띄운 채 휴대폰으로 업무 보드를 봐도 TV 가 바뀌지 않게).
+ */
+export const BOARD_KINDS = ['work', 'class'] as const;
+export type BoardKind = (typeof BOARD_KINDS)[number];
+export const BOARD_KIND_LABEL: Record<BoardKind, string> = { work: '업무', class: '수업' };
+export const boardKindOf = (v: unknown): BoardKind => (v === 'class' ? 'class' : 'work');
+
 export interface BoardDto {
   id: string;
   name: string;
+  kind: BoardKind;
   /** 보드 꾸미기(바탕색) */
   theme: BoardTheme;
   blocks: BlockDto[];

@@ -58,6 +58,7 @@ async function failure(res: Response): Promise<ApiError> {
 async function request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const headers: Record<string, string> = {};
   if (method !== 'GET') headers['X-CSRF-Token'] = csrfToken();
+  headers['X-Board'] = useApp.getState().boardKind;
   let payload: BodyInit | undefined;
   if (body instanceof FormData) payload = body;
   else if (body !== undefined) {
@@ -111,6 +112,7 @@ export async function streamAi(body: AiMessageBody, onEvent: (event: AiStreamEve
         'Content-Type': 'application/json',
         'X-CSRF-Token': csrfToken(),
         Accept: 'text/event-stream',
+        'X-Board': useApp.getState().boardKind,
       },
       body: JSON.stringify(body),
       credentials: 'same-origin',

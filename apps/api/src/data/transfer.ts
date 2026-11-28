@@ -19,6 +19,8 @@ export const SYNC_TABLES = [
   'menu_items',
   'memories',
   'shares',
+  'quizzes',
+  'quiz_responses',
   'blocks',
   'tasks',
   'events',
@@ -28,7 +30,7 @@ export const SYNC_TABLES = [
   'llm_runs',
 ] as const;
 /** 나중에 더한 표 — 그 전에 만든 파일·드라이브 자료에는 없으므로 빈 표로 받는다(새 표를 SYNC_TABLES 에 더하면 여기에도). */
-export const ADDED_LATER_TABLES = ['menu_items', 'memories', 'shares'] as const;
+export const ADDED_LATER_TABLES = ['menu_items', 'memories', 'shares', 'quizzes', 'quiz_responses'] as const;
 /** 옮기지 않는 표(시험이 표 목록 전체와 견준다 — 새 표가 생기면 둘 중 하나에 넣는다). */
 export const LOCAL_ONLY_TABLES = ['schema_migrations', 'app_meta', 'allowed_emails', 'sessions', 'api_keys', 'connectors', 'uploads', 'audit_logs'] as const;
 /** users 줄에서 옮기는 칸(이메일·PIN·암호·잠금은 옮기지 않는다) */
@@ -156,6 +158,7 @@ export async function importData(q: Queryable, raw: unknown, userId: string): Pr
     `select 'blocks.board_id' as what from blocks c where c.user_id = $1 and not exists (select 1 from boards p where p.id = c.board_id and p.user_id = $1)
      union all select 'blocks.source_table_id' from blocks c where c.user_id = $1 and c.source_table_id is not null and not exists (select 1 from data_tables p where p.id = c.source_table_id and p.user_id = $1)
      union all select 'data_rows.table_id' from data_rows c where c.user_id = $1 and not exists (select 1 from data_tables p where p.id = c.table_id and p.user_id = $1)
+     union all select 'quiz_responses.quiz_id' from quiz_responses c where c.user_id = $1 and not exists (select 1 from quizzes p where p.id = c.quiz_id and p.user_id = $1)
      union all select 'messages.conversation_id' from messages c where c.user_id = $1 and not exists (select 1 from conversations p where p.id = c.conversation_id and p.user_id = $1)
      limit 1`,
     [userId],

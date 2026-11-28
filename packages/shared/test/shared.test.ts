@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import {
+  qrMatrix,
   BLOCK_TYPES,
   DEFAULT_BLOCK_SIZE,
   DEFAULT_MEMO_COLOR,
@@ -402,5 +403,29 @@ describe('AI 화면 블록의 자료 정의', () => {
     });
     assert.deepEqual(readViewData({ kind: 'events', days_before: 7, days_after: 14 }), { kind: 'events', days_before: 7, days_after: 14 });
     assert.equal(readViewData({ kind: 'table', table_id: TABLE, query: { limit: 10 } }).kind, 'table');
+  });
+});
+
+describe('QR 코드', () => {
+  // 아래 지문은 같은 판·마스크로 qrcode 라이브러리와 칸마다 견줘 같음을 확인한 결과다(1~10판 × 마스크 8개 × 한글·200자, 2026-11-28)
+  const print = (g: boolean[][]) => {
+    let h = 0;
+    for (const row of g) for (const c of row) h = (Math.imul(h, 31) + (c ? 1 : 0)) | 0;
+    return `${g.length}:${h}`;
+  };
+  it('같은 주소는 늘 같은 그림, 찾기 무늬가 세 귀퉁이에', () => {
+    const g = qrMatrix('https://example.com/quiz/q/AbC_-1234567')!;
+    assert.equal(g.length, 29); // 40바이트 → 3판
+    assert.equal(print(g), print(qrMatrix('https://example.com/quiz/q/AbC_-1234567')!));
+    for (const [x, y] of [
+      [0, 0],
+      [22, 0],
+      [0, 22],
+    ])
+      for (let i = 0; i < 7; i++) assert.equal(g[y]![x + i], true, `윗줄 ${x},${y}`);
+  });
+  it('214바이트가 넘으면 만들지 않는다', () => {
+    assert.ok(qrMatrix('x'.repeat(213)));
+    assert.equal(qrMatrix('x'.repeat(214)), null);
   });
 });

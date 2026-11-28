@@ -7,6 +7,7 @@ import {
   PRIORITY_LABEL,
   TASK_FILTER_LABEL,
   taskFilterOf,
+  pickTasks,
   type BlockDto,
   type Column,
   type EventDto,
@@ -19,9 +20,12 @@ import { Icon } from '../components/Icon';
 import { SafeText } from '../components/SafeText';
 import { CountBadge, Empty, IconButton, Tag, useSize } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
-import { keys, queryClient, refresh, useEvents, useNotifications, useQueryResult, useRows, useTable, useTasks } from '../lib/data';
+import { boardKey, keys, queryClient, refresh, useEvents, useMenus, useNotifications, useQueryResult, useRows, useTable, useTasks } from '../lib/data';
 import { ago, cellText, dayKey, dueLabel, localInputToIso, shortWhen, timeLabel, zoneOffset } from '../lib/format';
 import { useApp } from '../lib/store';
+import { MenuBlockBody } from '../menu/menu';
+import { QuizBody, useQuizStats } from './quiz';
+import { LinksBody } from './links';
 import { ViewBody } from './view';
 
 // 블록 7종의 내용(BRD-5, AI 화면은 view.tsx). 블록 안에는 스크롤을 만들지 않는다:
@@ -103,12 +107,7 @@ export async function toggleTask(t: TaskDto): Promise<void> {
 
 /** 블록 설정(할 일 보기 방식)대로 거른다 — 마감이 지난 것도 '오늘까지'에 든다 */
 function filterTasks(tasks: TaskDto[], block: BlockDto): TaskDto[] {
-  const f = taskFilterOf(block.config);
-  if (f === 'all') return tasks;
-  const open = tasks.filter((t) => t.status === 'open');
-  if (f === 'open') return open;
-  const limit = new Date(`${dayKey(new Date())}T00:00:00${zoneOffset()}`).getTime() + (f === 'today' ? 1 : 7) * 86_400_000;
-  return open.filter((t) => t.due_at && new Date(t.due_at).getTime() < limit);
+  return pickTasks(tasks, taskFilterOf(block.config), new Date(`${dayKey(new Date())}T00:00:00${zoneOffset()}`).getTime());
 }
 function filterEvents(events: EventDto[], block: BlockDto): EventDto[] {
   const until = new Date(`${dayKey(new Date())}T00:00:00${zoneOffset()}`).getTime() + eventDaysOf(block.config) * 86_400_000;
@@ -126,7 +125,7 @@ function TasksBody({ block }: { block: BlockDto }) {
   return (
     <PagedList
       items={data}
-      empty={isLoading ? '불러오는 중입니다' : f === 'all' || f === 'open' ? '할 일이 없습니다' : `${TASK_FILTER_LABEL[f]} 할 일이 없습니다`}
+      empty={isLoading ? '불러오는 중입니다' : f === 'all' || f === 'open' || f === 'dated' ? '할 일이 없습니다' : `${TASK_FILTER_LABEL[f]} 할 일이 없습니다`}
       action={<FooterButton icon="plus" label="추가" onClick={() => open({ kind: 'task' })} />}
       render={(t) => {
         const done = t.status === 'done';
@@ -462,7 +461,7 @@ function MemoBody({ block }: { block: BlockDto }) {
         await api.patch(`/blocks/${block.id}`, { config: { text: value } });
         saved.current = value;
         queryClient.setQueryData<{ blocks: BlockDto[] }>(
-          keys.board,
+          boardKey(),
           (b) =>
             b && {
               ...b,
@@ -615,6 +614,12 @@ export function BlockBody({ block, full }: { block: BlockDto; full?: boolean }) 
       return <AiResultBody block={block} full={full} />;
     case 'view':
       return <ViewBody block={block} />;
+    case 'menu':
+      return <MenuBlockBody />;
+    case 'quiz':
+      return <QuizBody block={block} />;
+    case 'links':
+      return <LinksBody block={block} />;
     default:
       return <Empty>알 수 없는 블록입니다</Empty>;
   }
@@ -701,6 +706,14 @@ function SummaryOf({ block, children }: { block: BlockDto; children: (s: BlockSu
       return <NotificationsSummary block={block}>{children}</NotificationsSummary>;
     case 'table':
       return <TableSummary block={block}>{children}</TableSummary>;
+    case 'menu':
+      return <MenuSummary>{children}</MenuSummary>;
+    case 'quiz':
+      return <QuizSummary block={block}>{children}</QuizSummary>;
+    case 'links': {
+      const items = Array.isArray(block.config.items) ? (block.config.items as { title?: string }[]) : [];
+      return <>{children({ count: items.length, alert: false, lines: items.map((i) => String(i.title ?? '')) })}</>;
+    }
     case 'view':
       // 그려서 보여 주는 블록이라 줄로 줄일 내용이 없다. 휴대폰 타일에는 여는 법만 적는다.
       return (
@@ -715,6 +728,28 @@ function SummaryOf({ block, children }: { block: BlockDto; children: (s: BlockSu
     default:
       return <TextSummary block={block}>{children}</TextSummary>;
   }
+}
+/** 휴대폰 타일: 받는 중에는 응답 수만(정답률은 마감 뒤 — 교실 화면으로 새지 않게, 코덱스 검토) */
+function QuizSummary({ block, children }: Render & { block: BlockDto }) {
+  const { data } = useQuizStats(typeof block.config.quiz_id === 'string' ? block.config.quiz_id : undefined);
+  return (
+    <>
+      {children({
+        count: data ? data.total : null,
+        alert: false,
+        lines: data
+          ? [
+              `${data.quiz.status === 'open' ? '받는 중' : '마감'} · 응답 ${data.total}명`,
+              ...(data.quiz.status === 'open' ? [] : data.questions).map((q, i) => `${i + 1}. 정답 ${q.correct === null ? '-' : `${q.answered ? Math.round((q.correct / q.answered) * 100) : 0}%`}`),
+            ]
+          : [],
+      })}
+    </>
+  );
+}
+function MenuSummary({ children }: Render) {
+  const { data = [] } = useMenus();
+  return <>{children({ count: null, alert: false, lines: data.map((m) => m.label) })}</>;
 }
 type Render = { children: (s: BlockSummary) => ReactNode };
 const TasksSummary = ({ block, children }: Render & { block: BlockDto }) => <>{children(useTasksSummary(block))}</>;

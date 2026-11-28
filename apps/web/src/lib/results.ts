@@ -3,7 +3,7 @@
  * 블록은 그대로, 표는 그 표를 보여 주는 블록, 할 일·일정은 그 종류의 블록으로 찾는다.
  */
 import type { BlockDto, BoardDto, CommandDto } from '@jarvis/shared';
-import { keys, queryClient } from './data';
+import { keys, queryClient, boardKey } from './data';
 import { useApp } from './store';
 
 export function blocksFor(cmd: Pick<CommandDto, 'touched'>, blocks: BlockDto[]): string[] {
@@ -22,7 +22,7 @@ export function blocksFor(cmd: Pick<CommandDto, 'touched'>, blocks: BlockDto[]):
 
 /** 바뀐 블록을 강조하고 첫 블록까지 스크롤한다. 찾은 블록 수를 돌려준다. close 면 AI 창·다른 창을 닫는다. */
 export function showOnBoard(cmd: Pick<CommandDto, 'touched'>, close = true): number {
-  const blocks = queryClient.getQueryData<BoardDto>(keys.board)?.blocks ?? [];
+  const blocks = queryClient.getQueryData<BoardDto>(boardKey())?.blocks ?? [];
   const ids = blocksFor(cmd, blocks);
   const app = useApp.getState();
   if (close) {

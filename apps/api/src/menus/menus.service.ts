@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import {
+  boardKindOf,
+  type BoardKind,
   COLUMN_TYPES,
   MENU_ACTION_LABEL,
   MENU_ACTION_TYPES,
@@ -18,6 +20,7 @@ import {
   type MenuRecommendation,
 } from '@jarvis/shared';
 import type { UserRow } from '../auth/auth.types';
+import { boardKind } from '../common/board-context';
 import { bad, notFound } from '../common/http';
 import { Db, type Queryable } from '../db/db.service';
 import { LlmService } from '../llm/llm.service';
@@ -196,8 +199,9 @@ export class MenusService {
     private readonly tables: TablesService,
   ) {}
 
-  list(userId: string, q: Queryable = this.db): Promise<MenuItemDto[]> {
-    return q.query<MenuItemDto>('select id, position, label, icon, description, action from menu_items where user_id = $1 order by position, created_at', [userId]);
+  /** 지금 보드(업무·수업)의 메뉴 — 보드마다 따로(2026-11-28) */
+  list(userId: string, q: Queryable = this.db, kind: BoardKind = boardKind()): Promise<MenuItemDto[]> {
+    return q.query<MenuItemDto>('select id, position, label, icon, description, action from menu_items where user_id = $1 and board_kind = $2 order by position, created_at', [userId, kind]);
   }
 
   /** 사용자의 AI 열쇠로 추천받는다. 저장하지 않는다. */
@@ -244,19 +248,29 @@ export class MenusService {
 
   /** 고른 추천으로 메뉴를 만든다(필요한 새 표도). 한 트랜잭션. */
   async create(userId: string, drafts: unknown): Promise<MenuItemDto[]> {
-    return this.db.tx(async (q) => (await this.createIn(q, userId, drafts)).all);
+    const kind = boardKind();
+    return this.db.tx(async (q) => (await this.createIn(q, userId, drafts, null, kind)).all);
   }
 
   /**
    * 트랜잭션(q) 안에서 만든다 — AI 계획 승인(commands.service)도 이것을 쓴다. commandId 를 주면 새 표에 남긴다(되돌리기).
    * 만든 메뉴 id 와 새 표 id 를 함께 돌려준다.
    */
-  async createIn(q: Queryable, userId: string, drafts: unknown, commandId: string | null = null): Promise<{ all: MenuItemDto[]; made: MenuItemDto[]; tables: { id: string; name: string }[] }> {
+  async createIn(
+    q: Queryable,
+    userId: string,
+    drafts: unknown,
+    commandId: string | null = null,
+    kind: BoardKind = boardKind(),
+  ): Promise<{ all: MenuItemDto[]; made: MenuItemDto[]; tables: { id: string; name: string }[] }> {
     if (!Array.isArray(drafts) || drafts.length === 0) bad('만들 메뉴를 고르세요.');
     {
       const own = new Set((await q.query<{ id: string }>('select id from data_tables where user_id = $1 and deleted_at is null', [userId])).map((r) => r.id));
       const checked = (drafts as unknown[]).map((d) => checkDraft(d, own));
-      const have = (await q.one<{ n: number; top: number }>('select count(*)::int as n, coalesce(max(position), -1)::int as top from menu_items where user_id = $1', [userId]))!;
+      const have = (await q.one<{ n: number; top: number }>('select count(*)::int as n, coalesce(max(position), -1)::int as top from menu_items where user_id = $1 and board_kind = $2', [
+        userId,
+        kind,
+      ]))!;
       if (have.n + checked.length > MENU_MAX) bad(`메뉴는 ${MENU_MAX}개까지입니다. 지금 ${have.n}개가 있습니다.`);
       const madeTables = new Map<string, string>();
       const made: MenuItemDto[] = [];
@@ -272,23 +286,21 @@ export class MenusService {
           action = { type: action.type, table_id: id };
         }
         made.push(
-          (await q.one<MenuItemDto>('insert into menu_items(user_id, position, label, icon, description, action) values ($1, $2, $3, $4, $5, $6::jsonb) returning id, position, label, icon, description, action', [
-            userId,
-            ++pos,
-            c.label,
-            c.icon,
-            c.description,
-            JSON.stringify(action),
-          ]))!,
+          (await q.one<MenuItemDto>(
+            'insert into menu_items(user_id, position, label, icon, description, action, board_kind) values ($1, $2, $3, $4, $5, $6::jsonb, $7) returning id, position, label, icon, description, action',
+            [userId, ++pos, c.label, c.icon, c.description, JSON.stringify(action), kind],
+          ))!,
         );
       }
-      return { all: await this.list(userId, q), made, tables: [...madeTables].map(([name, id]) => ({ id, name })) };
+      return { all: await this.list(userId, q, kind), made, tables: [...madeTables].map(([name, id]) => ({ id, name })) };
     }
   }
 
   /** 순서를 바꾼다(q 안에서). index 는 0부터, 나머지는 원래 순서대로. */
   async moveIn(q: Queryable, userId: string, id: string, index: number): Promise<void> {
-    const ids = (await this.list(userId, q)).map((m) => m.id).filter((x) => x !== id);
+    // 그 메뉴가 놓인 보드 안에서 순서를 바꾼다
+    const kind = boardKindOf((await q.one<{ board_kind: string }>('select board_kind from menu_items where id = $1 and user_id = $2', [id, userId]))?.board_kind);
+    const ids = (await this.list(userId, q, kind)).map((m) => m.id).filter((x) => x !== id);
     ids.splice(Math.max(0, Math.min(ids.length, index)), 0, id);
     for (const [i, mid] of ids.entries()) await q.query('update menu_items set position = $3, updated_at = now() where id = $1 and user_id = $2', [mid, userId, i]);
   }
@@ -297,7 +309,10 @@ export class MenusService {
     const label = body?.label === undefined ? null : clip(body.label, MENU_LABEL_MAX) || bad('메뉴 이름이 비었습니다.');
     const icon = body?.icon === undefined ? null : (MENU_ICONS as readonly string[]).includes(String(body.icon)) ? String(body.icon) : bad('쓸 수 없는 아이콘입니다.');
     const description = body?.description === undefined ? null : clip(body.description, 120);
-    const r = await this.db.query('update menu_items set label = coalesce($3, label), icon = coalesce($4, icon), description = coalesce($5, description), updated_at = now() where id = $1 and user_id = $2 returning id', [id, userId, label, icon, description]);
+    const r = await this.db.query(
+      'update menu_items set label = coalesce($3, label), icon = coalesce($4, icon), description = coalesce($5, description), updated_at = now() where id = $1 and user_id = $2 returning id',
+      [id, userId, label, icon, description],
+    );
     if (r.length === 0) notFound('메뉴');
   }
 

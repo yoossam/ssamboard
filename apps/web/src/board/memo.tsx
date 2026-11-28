@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { blockBg, MEMO_COLORS, MEMO_COLOR_LABEL, TITLE_COLORS, TITLE_COLOR_LABEL, titleColor, type BlockDto, type BoardDto, type MemoColor, type TitleColor } from '@jarvis/shared';
 import { Icon } from '../components/Icon';
 import { api, errorMessage } from '../lib/api';
-import { keys, queryClient, refresh } from '../lib/data';
+import { keys, queryClient, refresh, boardKey } from '../lib/data';
 import { useApp } from '../lib/store';
 
 // 메모(붙임쪽지)의 종이 색. 색 이름은 shared 의 MEMO_COLORS, 색 값은 styles.css 의 [data-memo] 에 있다.
@@ -16,7 +16,7 @@ export async function setBlockStyle(block: BlockDto, change: { bg?: MemoColor; t
   const patch: Record<string, string> = {};
   if (change.bg) patch[block.type === 'memo' ? 'color' : 'bg'] = change.bg;
   if (change.title_color) patch.title_color = change.title_color;
-  queryClient.setQueryData<BoardDto>(keys.board, (board) => board && { ...board, blocks: board.blocks.map((b) => (b.id === block.id ? { ...b, config: { ...b.config, ...patch } } : b)) });
+  queryClient.setQueryData<BoardDto>(boardKey(), (board) => board && { ...board, blocks: board.blocks.map((b) => (b.id === block.id ? { ...b, config: { ...b.config, ...patch } } : b)) });
   try {
     await api.patch(`/blocks/${block.id}`, { config: patch });
   } catch (e) {

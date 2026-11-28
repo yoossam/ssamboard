@@ -53,7 +53,18 @@ const PATHS: Record<string, (string | { rect: [number, number, number, number, n
 /** 점으로 그리는 아이콘은 선을 굵게 해야 보인다. */
 const BOLD = new Set(['more', 'drag']);
 
-export const BLOCK_ICON: Record<BlockType, string> = { tasks: 'tasks', events: 'calendar', table: 'table', memo: 'memo', ai_result: 'sparkle', notifications: 'bell', view: 'chart' };
+export const BLOCK_ICON: Record<BlockType, string> = {
+  tasks: 'tasks',
+  events: 'calendar',
+  table: 'table',
+  memo: 'memo',
+  ai_result: 'sparkle',
+  notifications: 'bell',
+  view: 'chart',
+  menu: 'grid',
+  quiz: 'check',
+  links: 'link',
+};
 
 export function Icon({ name, size = 20, className }: { name: string; size?: number; className?: string }) {
   const parts = PATHS[name] ?? PATHS.info;

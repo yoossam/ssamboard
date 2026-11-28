@@ -3,6 +3,7 @@
  * 주소·인자 자리는 컨트롤러의 데코레이터(shim/nest-common.ts 가 적어 둔 것)에서 읽으므로 따로 적지 않는다.
  * 결과는 진짜 fetch 처럼 Response 로 돌려준다 — 화면 코드(apps/web/src/lib/api.ts)는 두 트랙에서 똑같다.
  */
+import { runWithBoard } from './shim/board-context';
 import { controllerMeta, HttpException, type ExecutionContext, type ParamSpec } from './shim/nest-common';
 
 interface CompiledRoute {
@@ -184,7 +185,9 @@ export class LocalRouter {
       }
     });
 
-    const run = async () => found.route.instance[found.route.key](...args);
+    // 수업·업무 보드(X-Board) — 서버 판은 main.ts 가 요청마다 담는다
+    const hdr = init.headers instanceof Headers ? init.headers.get('X-Board') : (init.headers as Record<string, string> | undefined)?.['X-Board'];
+    const run = async () => runWithBoard(hdr, () => found.route.instance[found.route.key](...args));
     if (found.route.usesRes) {
       // 메서드가 응답을 직접 쓴다(AI 창의 흘려보내기, 틀 문서). 머리글이 정해지는 순간 Response 를 넘긴다.
       const done = run()

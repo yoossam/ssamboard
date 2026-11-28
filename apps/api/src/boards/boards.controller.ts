@@ -15,6 +15,7 @@ import {
   EVENT_DAYS,
   NOTI_SHOWS,
   TASK_FILTERS,
+  checkLinkItems,
 } from '@jarvis/shared';
 import type { Response } from 'express';
 import { Auth, type AuthCtx } from '../auth/auth.types';
@@ -51,6 +52,12 @@ function checkConfig(config: Record<string, any> | undefined): Record<string, an
   if (config.noti_show !== undefined && !(NOTI_SHOWS as readonly unknown[]).includes(config.noti_show)) bad('알림 보기 방식이 잘못됐습니다.');
   if (config.code !== undefined && (typeof config.code !== 'string' || config.code.length > VIEW_CODE_MAX)) bad(`그리기 코드는 ${VIEW_CODE_MAX.toLocaleString()}자까지입니다.`);
   if (config.css !== undefined && (typeof config.css !== 'string' || config.css.length > VIEW_CSS_MAX)) bad(`꾸밈(CSS)은 ${VIEW_CSS_MAX.toLocaleString()}자까지입니다.`);
+  // 수업 자료 블록의 링크(https 만, 30개까지 — @jarvis/shared links.ts)
+  if (config.items !== undefined) {
+    const checked = checkLinkItems(config.items);
+    if (!checked.ok) bad(checked.error);
+    config = { ...config, items: checked.items };
+  }
   return config.data === undefined ? config : { ...config, data: readViewData(config.data) };
 }
 
@@ -109,6 +116,11 @@ export class BoardsController {
 
   @Patch('blocks/:id')
   async update(@Auth() ctx: AuthCtx, @Param('id') id: string, @Body() body: any): Promise<BlockDto> {
+    // 수업 자료 목록은 읽었던 목록(items_base)과 견주어 저장한다
+    if (typeof body?.items_base === 'string' && body?.title === undefined && body?.config && typeof body.config === 'object' && Object.keys(body.config).join() === 'items') {
+      const cfg = checkConfig(obj(body.config, 'config'))!;
+      return (await this.boards.updateLinks(ctx.user.id, uuid(id), cfg.items, body.items_base)) ?? notFound('블록');
+    }
     const block = await this.boards.updateBlock(ctx.user.id, uuid(id), {
       title: optStr(body?.title, '제목', { max: 60 }),
       config: body?.config === undefined ? undefined : checkConfig(obj(body.config, 'config')),

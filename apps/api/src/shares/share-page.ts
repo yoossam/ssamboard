@@ -7,7 +7,7 @@
  *  - 주민등록번호·카드번호 모양은 가린다(maskPii). 표는 고른 칸을 빼고, 줄은 MAX_ROWS 까지만.
  *  - 알림·AI 화면 블록은 공유하지 않는다(SHAREABLE_BLOCKS).
  */
-import { eventDaysOf, maskPii, SHAREABLE_BLOCKS, taskFilterOf, type BlockDto, type Column, type ShareOptions } from '@jarvis/shared';
+import { checkLinkItems, eventDaysOf, LINK_KIND_LABEL, maskPii, pickTasks, SHAREABLE_BLOCKS, studentUrl, taskFilterOf, type BlockDto, type Column, type ShareOptions } from '@jarvis/shared';
 import { bad } from '../common/http';
 import type { ItemsService } from '../items/items.service';
 import type { TablesService } from '../tables/tables.service';
@@ -19,7 +19,7 @@ export interface ShareView {
   title: string;
   kind: 'list' | 'table' | 'text';
   /** 목록: 할 일·일정 */
-  items?: { title: string; when: string; done?: boolean }[];
+  items?: { title: string; when: string; done?: boolean; url?: string }[];
   /** 표 */
   columns?: string[];
   rows?: string[][];
@@ -93,7 +93,7 @@ function pickColumns<T>(all: T[], key: (c: T) => string, options: ShareOptions):
 
 /** 블록 하나의 지금 자료 — 그 사용자 것만 읽는다(서비스들이 user_id 로 거른다). */
 export async function buildShareView(deps: { items: ItemsService; tables: TablesService }, userId: string, timeZone: string, block: BlockDto, options: ShareOptions): Promise<ShareView> {
-  if (!SHAREABLE_BLOCKS.includes(block.type)) bad('이 블록은 공유할 수 없습니다(할 일·일정·표·메모·AI 결과만 됩니다).');
+  if (!SHAREABLE_BLOCKS.includes(block.type)) bad('이 블록은 공유할 수 없습니다(할 일·일정·표·메모·AI 결과·수업 자료만 됩니다).');
   const title = clean(block.title).slice(0, 120) || '쌤보드';
   const updated_at = new Date().toISOString();
   switch (block.type) {
@@ -101,8 +101,7 @@ export async function buildShareView(deps: { items: ItemsService; tables: Tables
       // 블록에 보이는 만큼만 — 블록의 '보여 줄 할 일' 설정을 그대로 따른다(코덱스 검토)
       const f = taskFilterOf(block.config);
       const all = await deps.items.listTasks(userId, f === 'all' ? undefined : 'open');
-      const limit = startOfDay(timeZone) + (f === 'today' ? 1 : 7) * 86_400_000;
-      const tasks = (f === 'today' || f === 'week' ? all.filter((t) => t.due_at && new Date(t.due_at).getTime() < limit) : all).slice(0, SHARE_MAX_ROWS);
+      const tasks = pickTasks(all, f, startOfDay(timeZone)).slice(0, SHARE_MAX_ROWS);
       return {
         title,
         kind: 'list',
@@ -148,6 +147,27 @@ export async function buildShareView(deps: { items: ItemsService; tables: Tables
         empty: '줄이 없습니다',
         updated_at,
         shown: cols.map((c) => c.id),
+      };
+    }
+    case 'links': {
+      // 학생에게 보이기를 켠 자료만, 보기 주소로(편집 주소를 내보내지 않는다 — 코덱스·제미나이 검토)
+      // 한 항목이 이상해도 나머지는 보인다(항목마다 거른다). 주소 옆에 실제 도메인을 적어 비슷한 주소에 속지 않게
+      const raw: unknown[] = Array.isArray(block.config.items) ? block.config.items : [];
+      const items = raw
+        .flatMap((r) => {
+          const c = checkLinkItems([r]);
+          return c.ok ? c.items : [];
+        })
+        .filter((i) => i.student);
+      return {
+        title,
+        kind: 'list',
+        items: items.map((i) => {
+          const url = studentUrl(i.url);
+          return { title: clean(i.title), when: `${LINK_KIND_LABEL[i.kind]} · ${new URL(url).hostname}`, url };
+        }),
+        empty: '학생에게 보이는 자료가 아직 없습니다.',
+        updated_at,
       };
     }
     case 'ai_result': {
@@ -217,7 +237,7 @@ export function renderSharePage(view: ShareView, timeZone: string, note = ''): s
   if (view.kind === 'list') {
     body +=
       view.items && view.items.length > 0
-        ? `<ul>${view.items.map((i) => `<li><span>${esc(i.title)}</span>${i.when ? `<span class="when">${esc(i.when)}</span>` : ''}</li>`).join('')}</ul>`
+        ? `<ul>${view.items.map((i) => `<li>${i.url ? `<a href="${esc(i.url)}" target="_blank" rel="noopener noreferrer">${esc(i.title)}</a>` : `<span>${esc(i.title)}</span>`}${i.when ? `<span class="when">${esc(i.when)}</span>` : ''}</li>`).join('')}</ul>`
         : `<p class="empty">${esc(view.empty)}</p>`;
   } else if (view.kind === 'table') {
     body +=

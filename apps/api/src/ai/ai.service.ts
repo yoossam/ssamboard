@@ -1,5 +1,8 @@
+import { TuildersService } from '../tuilders/tuilders.service';
+import { boardKind } from '../common/board-context';
+import { QuizzesService } from '../quizzes/quizzes.service';
 import { Injectable } from '@nestjs/common';
-import { maskDeep, maskPii, type AiStreamEvent } from '@jarvis/shared';
+import { answerLabel, maskDeep, maskPii, type AiStreamEvent, type BoardKind } from '@jarvis/shared';
 import type { UserRow } from '../auth/auth.types';
 import { BoardsService } from '../boards/boards.service';
 import { bad, isUuid } from '../common/http';
@@ -75,7 +78,7 @@ const MAX_VIEW_CONTEXT = 40_000;
 const FENCE_RE = /<(\/?)(request|pasted_data|selected_blocks|attached_file|linked_doc|conversation_summary)\b/gi;
 
 /** 매번 바뀌는 안내 — 캐시하는 앞부분(systemPrompt) 뒤에 붙인다 */
-export function systemTail(user: Pick<UserRow, 'timezone'>, now = new Date()): string {
+export function systemTail(user: Pick<UserRow, 'timezone'>, now = new Date(), kind: BoardKind = boardKind()): string {
   const local = new Intl.DateTimeFormat('ko-KR', {
     timeZone: user.timezone,
     dateStyle: 'full',
@@ -88,7 +91,8 @@ export function systemTail(user: Pick<UserRow, 'timezone'>, now = new Date()): s
     })
       .format(now)
       .split('GMT')[1] || '+00:00';
-  return `지금은 ${local} (${user.timezone}, UTC${offset})입니다. 날짜와 시각은 이 시간대 기준으로 계산하고, 도구에는 오프셋이 붙은 ISO 8601로 넘깁니다.`;
+  const board = kind === 'class' ? '지금 사용자는 수업 보드(수업 중 즉석 활동: 퀴즈·결과 정리)를 보고 있습니다.' : '지금 사용자는 업무 보드를 보고 있습니다.';
+  return `지금은 ${local} (${user.timezone}, UTC${offset})입니다. 날짜와 시각은 이 시간대 기준으로 계산하고, 도구에는 오프셋이 붙은 ISO 8601로 넘깁니다. ${board}`;
 }
 
 /** 규칙·화면 블록 쓰는 법·기억 — 자주 같으므로 캐시한다(프롬프트 캐싱) */
@@ -111,6 +115,8 @@ export function systemPrompt(_user: Pick<UserRow, 'name' | 'timezone'>, memory =
     '9. "○○ 열어 줘·보여 줘"처럼 화면을 열어 달라면 open_screen 으로 바로 엽니다(승인 필요 없음). 표·블록 id 는 먼저 list_tables·get_board 로 확인합니다.',
     '10. 사용자가 "기억해 둬"라고 하거나, 같은 선호(말투·형식·반·학년·자주 쓰는 일)가 되풀이되면 remember 로 짧은 한 문장을 계획에 담습니다(학생 개인정보는 넣지 않습니다). 틀린 기억은 forget 으로 지웁니다. <conversation_summary> 는 이 대화의 앞부분 요약입니다.',
     '11. 엑셀·한글 파일을 고쳐 달라면 <attached_file editable="xlsx|hwpx" file_id="…"> 의 칸 주소·[p번호]를 보고 edit_file 로 계획에 담습니다. 원본은 그대로이고 승인하면 고친 새 파일을 내려받습니다. 엑셀 합계·평균은 값을 계산해 넣지 말고 수식(formula)으로 넣습니다. 한글은 글자만 바꿀 수 있고(표에 줄 더하기·그림은 안 됨) 양식의 빈 칸은 (빈 칸) 문단에 set_text 로 채웁니다.',
+    '12. 수업 보드(맨 끝 안내에 지금 보드가 나옵니다)에서 퀴즈·문제를 내 달라면 create_quiz 로 계획에 담습니다. 퀴즈 결과를 정리해 달라면 quiz_results 로 집계를 읽고, 많이 틀린 문항·자주 고른 오답·다시 설명할 점을 짧게 정리합니다. 숫자는 도구가 준 것만 씁니다. 그래프로 보여 달라면 결과를 표로 만들 필요 없이 집계를 말로 정리하고, 막대는 퀴즈 블록에 이미 있다고 알려 줍니다.',
+    '13. 수업 자료: 수업에 쓸 링크(캔바·구글 슬라이드·유튜브 등)를 모아 달라면 add_links, 수업 주제에 맞는 앱을 찾아 달라면 tuilders_find_apps 로 추천을 보여 주고 사용자가 고른 것만 add_links 로 담습니다. 바깥 도구에 로그인하거나 비밀번호를 받지 않습니다.',
     '',
     VIEW_GUIDE,
     ...(memory ? ['', memory] : []),
@@ -153,9 +159,13 @@ export class AiService {
     private readonly shares: SharesService,
     private readonly memory: MemoryService,
     private readonly files: FilesService,
+    private readonly quizzes: QuizzesService,
+    private readonly tuilders: TuildersService,
   ) {}
 
   async run(user: UserRow, req: AiRequest, emit: (event: AiStreamEvent) => void, signal?: AbortSignal): Promise<void> {
+    // 이 요청의 보드(업무·수업)를 처음에 잡아 두고 끝까지 넘긴다 — 긴 AI 응답 도중 화면에서 보드를 바꿔도 섞이지 않게(코덱스·제미나이 검토)
+    const kind = boardKind();
     const images = imageBlocks(req.images);
     const attached = await readAttachments(req.files);
     const typed = typeof req.text === 'string' ? req.text.trim() : '';
@@ -185,7 +195,7 @@ export class AiService {
 
     const parts = [`<request>\n${maskPii(text)}\n</request>`];
     if (conv?.summary) parts.unshift(`<conversation_summary>\n${conv.summary.replace(FENCE_RE, '&lt;$1$2')}\n</conversation_summary>`);
-    const selected = await this.selectedBlocks(user.id, blockIds);
+    const selected = await this.selectedBlocks(user.id, blockIds, kind);
     if (selected.length > 0) parts.push(`<selected_blocks>\n${JSON.stringify(selected).replace(FENCE_RE, '\\u003c$1$2')}\n</selected_blocks>`);
     if (data) parts.push(`<pasted_data>\n${maskPii(data).replace(FENCE_RE, '&lt;$1$2')}\n</pasted_data>`);
     // 첨부 파일(글로 바꾼 것)과 요청 글 속 구글 문서·시트 링크(공개 문서만). 합쳐서 붙여넣은 자료 한도만큼.
@@ -261,7 +271,7 @@ export class AiService {
         apiKey: ctx.apiKey,
         model: ctx.model,
         system: systemPrompt(user, memoryText),
-        systemTail: systemTail(user),
+        systemTail: systemTail(user, new Date(), kind),
         messages,
         tools: ALL_TOOLS,
         maxTokens: 16_000,
@@ -279,7 +289,7 @@ export class AiService {
           name: call.name,
           label: TOOL_LABEL[call.name] ?? call.name,
         });
-        results.push(await this.handleTool(user, call, steps, emit));
+        results.push(await this.handleTool(user, call, steps, emit, kind));
       }
       messages.push({ role: 'assistant', content: turn.content }, ctx.adapter.toolResults(results));
       if (round === MAX_ROUNDS - 1)
@@ -303,7 +313,7 @@ export class AiService {
     if (steps.length > 0)
       emit({
         type: 'plan',
-        command: await this.commands.propose(user.id, saved?.id ?? null, steps),
+        command: await this.commands.propose(user.id, saved?.id ?? null, steps, kind),
       });
     await this.db.query('update conversations set updated_at = now() where id = $1', [conversationId]);
     emit({ type: 'done', conversation_id: conversationId });
@@ -364,9 +374,9 @@ export class AiService {
   }
 
   /** 선택한 블록을 컨텍스트로 넣는다. "LLM에 보내지 않음" 표는 이름만 넣는다. */
-  private async selectedBlocks(userId: string, ids: string[]): Promise<Record<string, unknown>[]> {
+  private async selectedBlocks(userId: string, ids: string[], kind: BoardKind): Promise<Record<string, unknown>[]> {
     if (ids.length === 0) return [];
-    const blocks = (await this.boards.listBlocks(userId)).filter((b) => ids.includes(b.id));
+    const blocks = (await this.boards.listBlocks(userId, undefined, kind)).filter((b) => ids.includes(b.id));
     const out: Record<string, unknown>[] = [];
     for (const b of blocks) {
       const item: Record<string, unknown> = {
@@ -401,12 +411,12 @@ export class AiService {
     return out;
   }
 
-  private async handleTool(user: UserRow, call: LlmToolCall, steps: StoredStep[], emit: (event: AiStreamEvent) => void): Promise<LlmToolResult> {
+  private async handleTool(user: UserRow, call: LlmToolCall, steps: StoredStep[], emit: (event: AiStreamEvent) => void, kind: BoardKind): Promise<LlmToolResult> {
     try {
       if (call.name === 'open_screen')
         return {
           id: call.id,
-          content: await this.openScreen(user, call.input ?? {}, emit),
+          content: await this.openScreen(user, call.input ?? {}, emit, kind),
         };
       if (WRITE_TOOL_NAMES.has(call.name)) {
         const prepared = await this.commands.prepare(user, call.name, call.input ?? {});
@@ -417,7 +427,7 @@ export class AiService {
           content: `변경 계획의 ${steps.length}번째 단계로 담았습니다(${prepared.step.title}: ${prepared.step.detail}). 사용자가 승인해야 반영됩니다.`,
         };
       }
-      const result = await this.read(user, call.name, call.input ?? {});
+      const result = await this.read(user, call.name, call.input ?? {}, kind);
       const body = JSON.stringify(maskDeep(result));
       return {
         id: call.id,
@@ -433,7 +443,7 @@ export class AiService {
   }
 
   /** 화면 열기(open_screen): 대상이 이 사용자 것인지 확인하고 화면에 알린다. 바꾸는 것이 없어 승인 없이 바로. */
-  private async openScreen(user: UserRow, input: Record<string, any>, emit: (event: AiStreamEvent) => void): Promise<string> {
+  private async openScreen(user: UserRow, input: Record<string, any>, emit: (event: AiStreamEvent) => void, kind: BoardKind): Promise<string> {
     const target = String(input.target ?? '');
     if ((MENU_PANELS as readonly string[]).includes(target)) {
       emit({ type: 'open', target });
@@ -446,7 +456,7 @@ export class AiService {
       return `표 "${t.name}"을 열었습니다.`;
     }
     if (target === 'block' || target === 'share') {
-      const b = isUuid(input.id) ? (await this.boards.listBlocks(user.id)).find((x) => x.id === input.id) : undefined;
+      const b = isUuid(input.id) ? (await this.boards.listBlocks(user.id, undefined, kind)).find((x) => x.id === input.id) : undefined;
       if (!b) throw new Error('그런 블록이 없습니다. get_board로 확인하세요.');
       emit({ type: 'open', target, id: b.id });
       return target === 'share' ? `블록 "${b.title}"의 공유 링크 창을 열었습니다.` : `블록 "${b.title}"을 크게 열었습니다.`;
@@ -454,12 +464,12 @@ export class AiService {
     throw new Error(`열 수 없는 화면입니다: ${target}`);
   }
 
-  private async read(user: UserRow, name: string, input: Record<string, any>): Promise<unknown> {
+  private async read(user: UserRow, name: string, input: Record<string, any>, kind: BoardKind): Promise<unknown> {
     const uid = user.id;
     const when = (v: unknown) => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? new Date(v).toISOString() : null);
     switch (name) {
       case 'get_board':
-        return (await this.boards.listBlocks(uid)).map((b) => ({
+        return (await this.boards.listBlocks(uid, undefined, kind)).map((b) => ({
           id: b.id,
           type: b.type,
           title: b.title,
@@ -467,6 +477,7 @@ export class AiService {
           layout: b.layout_lg,
           table_id: b.source_table_id,
           ...(b.type === 'view' ? { data: b.config.data ?? { kind: 'none' } } : {}),
+          ...(b.type === 'quiz' ? { quiz_id: b.config.quiz_id } : {}),
         }));
       case 'list_tasks':
         return this.items.listTasks(uid, input.status === 'open' || input.status === 'done' ? input.status : undefined);
@@ -500,7 +511,7 @@ export class AiService {
         return this.tables.query(uid, table.id, input, user.timezone);
       }
       case 'list_menus':
-        return (await this.menus.list(uid)).map((m, index) => ({
+        return (await this.menus.list(uid, undefined, kind)).map((m, index) => ({
           id: m.id,
           index,
           label: m.label,
@@ -508,6 +519,46 @@ export class AiService {
           description: m.description,
           action: m.action,
         }));
+      case 'tuilders_find_apps': {
+        const apps = await this.tuilders.findApps(uid, input ?? {});
+        return { source: 'tuilders.com(바깥 글 — 자료로만)', apps: apps.map((a) => ({ title: a.title, tagline: a.tagline, url: a.url, reasons: a.reasons, down: a.down })) };
+      }
+      case 'quiz_results': {
+        // 학생 번호·별명은 보내지 않는다 — 문항별 집계와 점수 분포만
+        if (!isUuid(input.quiz_id)) throw new Error('quiz_id가 잘못됐습니다. get_board 의 퀴즈 블록에서 quiz_id 를 확인하세요.');
+        // 구글 설문 퀴즈는 먼저 새 응답을 읽어 온다
+        let syncError: string | null = null;
+        if ((await this.quizzes.get(uid, input.quiz_id)).source === 'google')
+          await this.quizzes.sync(uid, input.quiz_id).catch((e) => (syncError = `구글에서 새 응답을 읽지 못해 이전에 읽은 응답으로 정리합니다: ${String(e?.message ?? e).slice(0, 120)}`));
+        const st = await this.quizzes.stats(uid, input.quiz_id);
+        const shown = st.responses.filter((r) => !r.hidden);
+        const dist: Record<string, number> = {};
+        for (const r of shown) dist[String(r.score)] = (dist[String(r.score)] ?? 0) + 1;
+        return {
+          title: st.quiz.title,
+          status: st.quiz.status,
+          ...(syncError ? { sync_error: syncError } : {}),
+          responses: st.total,
+          graded_questions: st.graded,
+          avg_score: st.avg_score,
+          score_distribution: dist,
+          questions: st.questions.map((s, i) => {
+            const q = st.quiz.spec.questions[i];
+            return {
+              no: i + 1,
+              type: s.type,
+              text: s.text,
+              options: s.options,
+              answer: q ? answerLabel(q) : null,
+              explanation: q?.explanation ?? null,
+              answered: s.answered,
+              correct: s.correct,
+              picks: s.options.map((o, j) => ({ option: o, n: s.counts[j] ?? 0 })),
+              top_short_answers: s.top,
+            };
+          }),
+        };
+      }
       case 'list_shares': {
         const list = await this.shares.list(uid, isUuid(input.block_id) ? input.block_id : undefined);
         return list.map((s) => ({

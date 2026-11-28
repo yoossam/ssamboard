@@ -1,3 +1,4 @@
+import { openCreatedQuiz } from '../board/quiz';
 import { useEffect, useRef, useState } from 'react';
 import { create } from 'zustand';
 import {
@@ -18,7 +19,7 @@ import { BLOCK_ICON, Icon } from '../components/Icon';
 import { SafeText } from '../components/SafeText';
 import { Button, ButtonRow, compactInput, IconButton, inputClass, Notice, Tag, useIsPhone } from '../components/ui';
 import { api, errorMessage, streamAi } from '../lib/api';
-import { keys, queryClient, refresh, useBoard } from '../lib/data';
+import { keys, queryClient, refresh, useBoard, boardKey } from '../lib/data';
 import { blocksFor, showOnBoard } from '../lib/results';
 import { UNDO_SCOPE } from '../panels/Results';
 import {
@@ -412,6 +413,7 @@ function PlanCard({ msg }: { msg: AiMsg }) {
   const [working, setWorking] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const deletes = plan.steps.filter((s) => s.tool === 'delete_block').length;
+  const quiz = plan.steps.some((s) => s.tool === 'create_quiz');
 
   const run = async (action: 'apply' | 'undo' | 'cancel') => {
     if (action === 'apply' && deletes > 0 && !confirmDelete) return setConfirmDelete(true);
@@ -421,9 +423,11 @@ function PlanCard({ msg }: { msg: AiMsg }) {
       patch(msg.id, { plan: next });
       if (action !== 'cancel') await refresh();
       // 바뀐 곳을 보드에서 잠깐 강조한다(옆 패널이면 바로 보이고, 겹친 창이면 [보드에서 보기]로 — UX 토론 J)
+      // 퀴즈는 승인하면 바로 크게(학생 주소) 연다 — [퀴즈 시작] 한 번으로 학생에게(세 모델 합의)
+      if (action === 'apply' && openCreatedQuiz(next.touched)) return;
       if (action === 'apply') {
-        const n = blocksFor(next, queryClient.getQueryData<BoardDto>(keys.board)?.blocks ?? []).length;
-        if (n > 0) useApp.getState().flash(blocksFor(next, queryClient.getQueryData<BoardDto>(keys.board)?.blocks ?? []));
+        const n = blocksFor(next, queryClient.getQueryData<BoardDto>(boardKey())?.blocks ?? []).length;
+        if (n > 0) useApp.getState().flash(blocksFor(next, queryClient.getQueryData<BoardDto>(boardKey())?.blocks ?? []));
         toast(n > 0 ? `반영했습니다 · 바뀐 블록 ${n}개` : '반영했습니다');
       }
       if (action === 'undo') toast((next.skipped?.length ?? 0) > 0 ? `되돌렸습니다 · ${next.skipped!.length}건은 건너뜀` : '되돌렸습니다');
@@ -475,7 +479,7 @@ function PlanCard({ msg }: { msg: AiMsg }) {
                 취소
               </Button>
               <Button icon={confirmDelete ? 'trash' : 'check'} tone={confirmDelete ? 'danger' : 'primary'} disabled={working} onClick={() => run('apply')}>
-                {confirmDelete ? '삭제 포함 승인' : '승인'}
+                {confirmDelete ? '삭제 포함 승인' : quiz ? '퀴즈 시작' : '승인'}
               </Button>
             </ButtonRow>
             <p className="text-center text-xs text-sub">승인한 뒤에도 되돌릴 수 있습니다 · 결과는 위쪽 [처리 결과]에도 남습니다</p>

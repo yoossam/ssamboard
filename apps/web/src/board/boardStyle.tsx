@@ -3,13 +3,13 @@ import { createPortal } from 'react-dom';
 import { BOARD_BGS, BOARD_BG_LABEL, boardBg, type BoardBg, type BoardDto } from '@jarvis/shared';
 import { Icon } from '../components/Icon';
 import { api, errorMessage } from '../lib/api';
-import { keys, queryClient, refresh, useBoard } from '../lib/data';
+import { keys, queryClient, refresh, useBoard, boardKey } from '../lib/data';
 import { useApp } from '../lib/store';
 
 // 보드 전체 바탕색(2026-11-27 "배경 색깔 수정"). 값은 boards.theme.bg, 색 값은 styles.css 의 [data-board-bg].
 
 async function setBoardBg(bg: BoardBg): Promise<void> {
-  queryClient.setQueryData<BoardDto>(keys.board, (board) => board && { ...board, theme: { ...board.theme, bg } });
+  queryClient.setQueryData<BoardDto>(boardKey(), (board) => board && { ...board, theme: { ...board.theme, bg } });
   try {
     await api.patch('/boards/current/theme', { bg });
   } catch (e) {

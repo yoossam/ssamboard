@@ -1,3 +1,4 @@
+import { openCreatedQuiz } from '../board/quiz';
 /*
  * 처리 결과함(2026-11-28 세 모델 UX 토론 A) — "결과 처리 확인"을 한 곳에서.
  * AI 가 처리한 일을 최근 14일 동안 모아, 상태(승인 대기·마무리 중·완료·되돌림)와 할 수 있는 동작만 보인다.
@@ -50,6 +51,7 @@ function ResultCard({ cmd }: { cmd: CommandDto }) {
     try {
       const next = await api.post<CommandDto>(`/ai/commands/${cmd.id}/${action}`, action === 'apply' ? { edits: {} } : {});
       await refresh();
+      if (action === 'apply' && openCreatedQuiz(next.touched)) return;
       if (action === 'apply') {
         const n = showOnBoard(next, false);
         toast(n > 0 ? `반영했습니다 · 바뀐 블록 ${n}개를 표시했습니다` : '반영했습니다');
