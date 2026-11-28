@@ -18,7 +18,7 @@ export type MenuAction =
   | { type: 'open_panel'; panel: MenuPanel };
 
 export const MENU_ACTION_TYPES = ['ask_ai', 'open_table', 'add_row', 'link', 'open_panel'] as const;
-export const MENU_PANELS = ['notifications', 'tables', 'upload', 'trash', 'add-block', 'settings'] as const;
+export const MENU_PANELS = ['notifications', 'tables', 'upload', 'trash', 'add-block', 'settings', 'results', 'task', 'event'] as const;
 export type MenuPanel = (typeof MENU_PANELS)[number];
 export const MENU_PANEL_LABEL: Record<MenuPanel, string> = {
   notifications: '알림 센터',
@@ -27,6 +27,9 @@ export const MENU_PANEL_LABEL: Record<MenuPanel, string> = {
   trash: '휴지통',
   'add-block': '블록 추가',
   settings: '설정',
+  results: '처리 결과',
+  task: '할 일 추가',
+  event: '일정 추가',
 };
 export const MENU_ACTION_LABEL: Record<MenuAction['type'], string> = {
   ask_ai: 'AI 에게 시키기',
@@ -36,7 +39,28 @@ export const MENU_ACTION_LABEL: Record<MenuAction['type'], string> = {
   open_panel: '앱 화면 열기',
 };
 /** 메뉴에 쓸 수 있는 아이콘(화면의 Icon 이름 중 일부) */
-export const MENU_ICONS = ['sparkle', 'tasks', 'calendar', 'table', 'memo', 'bell', 'chart', 'sheet', 'link', 'upload', 'image', 'clip', 'edit', 'archive', 'pin', 'send', 'key', 'grid', 'palette', 'info'] as const;
+export const MENU_ICONS = [
+  'sparkle',
+  'tasks',
+  'calendar',
+  'table',
+  'memo',
+  'bell',
+  'chart',
+  'sheet',
+  'link',
+  'upload',
+  'image',
+  'clip',
+  'edit',
+  'archive',
+  'pin',
+  'send',
+  'key',
+  'grid',
+  'palette',
+  'info',
+] as const;
 export type MenuIcon = (typeof MENU_ICONS)[number];
 
 export const MENU_MAX = 12;
@@ -49,6 +73,30 @@ export interface MenuItemDto {
   icon: MenuIcon;
   description: string;
   action: MenuAction;
+  /** 자주 쓰는 기능이라 쌤보드가 저절로 넣은 메뉴(2026-11-28) */
+  auto?: boolean;
+  /** 최근 쓴 정도(하루 한 번 정리할 때 매긴 점수, 높을수록 위) */
+  score?: number;
+}
+
+/**
+ * 자주 쓰는 순 자동 메뉴(2026-11-28 선생님): 화면이 기능을 쓸 때마다 열쇠 하나를 남기고(usage_events),
+ * 서버가 하루 한 번 최근에 쓴 만큼 점수를 매겨(14일 반감) 자주 쓰는 메뉴는 위로·안 쓰는 메뉴는 아래로, 자주 쓰는데 메뉴에 없으면 넣는다.
+ * 열쇠 모양: menu:<메뉴 id> · panel:<MENU_PANELS> · table:<표 id>. AI 비용 없이 쓴 횟수로만 정한다.
+ */
+/** 내 메뉴 자동 정리 상태(메뉴 창에 '언제 정리했나'를 보여 준다) */
+export interface MenuInfoDto {
+  /** 마지막으로 자주 쓰는 순으로 정리한 때(아직 없으면 null) */
+  arranged_at: string | null;
+  /** 저절로 넣은 메뉴 수 */
+  auto_count: number;
+}
+export const USAGE_KEY_RE = /^(menu|table):[0-9a-f-]{36}$|^panel:[a-z-]{2,20}$/;
+/** 메뉴의 동작이 어떤 기능 열쇠에 해당하는지(같은 화면을 다른 길로 열어도 같은 기능으로 센다) */
+export function featureKeyOf(action: MenuAction): string | null {
+  if (action.type === 'open_panel') return `panel:${action.panel}`;
+  if (action.type === 'open_table' || action.type === 'add_row') return `table:${action.table_id}`;
+  return null;
 }
 
 /** 메뉴에 필요한 새 표(추천이 제안, 고르면 만든다) */

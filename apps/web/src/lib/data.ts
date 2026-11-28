@@ -1,5 +1,20 @@
 import { keepPreviousData, QueryClient, useQuery } from '@tanstack/react-query';
-import type { BoardDto, CommandDto, ConnectorDto, MenuItemDto, EventDto, NotificationDto, QueryResult, RowPage, SessionDto, SettingsDto, TableDto, TaskDto, TrashItem } from '@jarvis/shared';
+import type {
+  BoardDto,
+  CommandDto,
+  ConnectorDto,
+  MenuInfoDto,
+  MenuItemDto,
+  EventDto,
+  NotificationDto,
+  QueryResult,
+  RowPage,
+  SessionDto,
+  SettingsDto,
+  TableDto,
+  TaskDto,
+  TrashItem,
+} from '@jarvis/shared';
 import { api, ApiError } from './api';
 import { dayKey, zoneOffset } from './format';
 import { useApp } from './store';
@@ -68,6 +83,11 @@ export const useConnectors = () => useQuery({ queryKey: keys.connectors, queryFn
 export const useMenus = () => {
   const kind = useApp((s) => s.boardKind);
   return useQuery({ queryKey: [...keys.menus, kind], queryFn: () => api.get<MenuItemDto[]>('/menus') });
+};
+/** 내 메뉴 자동 정리 상태 — refresh('menus') 로 함께 새로 읽힌다 */
+export const useMenuInfo = () => {
+  const kind = useApp((s) => s.boardKind);
+  return useQuery({ queryKey: [...keys.menus, 'info', kind], queryFn: () => api.get<MenuInfoDto>('/menus/info') });
 };
 /** 처리 결과함(승인 대기·처리한 것) */
 export const useCommands = () => useQuery({ queryKey: keys.commands, queryFn: () => api.get<CommandDto[]>('/ai/commands'), refetchInterval: 120_000 });

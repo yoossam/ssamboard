@@ -369,6 +369,7 @@ export class CommandsService {
         if (!isUuid(input.id)) return fail('id가 잘못됐습니다. get_board로 확인하세요.');
         const block = await this.db.one<{ title: string; type: BlockType }>('select title, type from blocks where id = $1 and user_id = $2 and deleted_at is null', [input.id, uid]);
         if (!block) return fail('그런 블록이 없습니다. get_board로 다시 확인하세요.');
+        if (tool === 'delete_block' && block.type === 'menu') return fail('내 메뉴 블록은 지울 수 없습니다(보드마다 하나). 접어 두려면 사용자에게 ⋯ → 스티커로 접기를 안내하세요.');
         if (tool === 'delete_block')
           return {
             ok: true,

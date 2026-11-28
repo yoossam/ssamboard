@@ -32,7 +32,7 @@ test('서버 코드가 브라우저 틀(PGlite)에서 그대로 돈다', async (
   const r = await (await bundle('smoke')).run();
   console.log(JSON.stringify(r, null, 1));
   assert.equal(r.status.authenticated, true);
-  assert.deepEqual(r.board.blocks.sort(), ['events', 'memo', 'notifications', 'tasks']);
+  assert.deepEqual(r.board.blocks.sort(), ['events', 'memo', 'menu', 'notifications', 'tasks']);
   assert.equal(r.createTask, 201);
   assert.deepEqual(r.tasks, ['동의서 걷기']);
   assert.equal(r.badTask.status, 400);

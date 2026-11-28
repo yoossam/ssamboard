@@ -1,8 +1,10 @@
+import { trackUse } from '../lib/usage';
+import { MenuDrawer } from '../menu/menu';
 import { AbilitiesPanel } from './Abilities';
 import { NoteText } from '../components/SafeText';
 import { TuildersPanel } from '../board/links';
 import { QuizScreen } from '../board/quiz';
-import { useState, type ReactNode, type CSSProperties } from 'react';
+import { useEffect, useState, type ReactNode, type CSSProperties } from 'react';
 import { ResultsPanel } from './Results';
 import {
   BLOCK_LABEL,
@@ -28,6 +30,7 @@ import {
   type TaskDto,
   type TrashItem,
   isCollapsed,
+  MENU_PANELS,
 } from '@jarvis/shared';
 import { forgetLastConversation, useAi } from '../ai/AiWindow';
 import { SharePanel } from './Share';
@@ -289,9 +292,16 @@ function BlockEditPanel({ blockId }: { blockId: string }) {
       width={440}
       footer={
         <ButtonRow>
-          <Button icon="trash" tone="danger" disabled={busy} onClick={() => run('delete')}>
-            삭제
-          </Button>
+          {block.type === 'menu' ? (
+            // 내 메뉴 블록은 지우지 않는다(보드마다 하나 — 자주 쓰는 순 자동 메뉴)
+            <Button icon="close" disabled={busy} onClick={close}>
+              닫기
+            </Button>
+          ) : (
+            <Button icon="trash" tone="danger" disabled={busy} onClick={() => run('delete')}>
+              삭제
+            </Button>
+          )}
           <Button icon="save" tone="primary" disabled={busy} onClick={() => run('save')}>
             저장
           </Button>
@@ -765,15 +775,30 @@ function PanelView({ panel }: { panel: Panel }) {
       return <TuildersPanel blockId={panel.blockId} />;
     case 'abilities':
       return <AbilitiesPanel />;
+    case 'menu-drawer':
+      return <MenuDrawer />;
     default:
       return null;
   }
 }
 
 /** 맨 위의 창 하나만 그린다. 닫으면 그 아래 창(예: 표 목록)이 다시 보인다. */
+/** 창 하나를 연 것을 기능 기록으로(자주 쓰는 순 자동 메뉴 — 2026-11-28). 메뉴로 만들 수 있는 화면·표만. */
+function usageKeyOf(panel: Panel | undefined): string | null {
+  if (!panel) return null;
+  if (panel.kind === 'table') return `table:${panel.tableId}`;
+  if (panel.kind === 'task') return panel.taskId ? null : 'panel:task';
+  if (panel.kind === 'event') return panel.eventId ? null : 'panel:event';
+  return (MENU_PANELS as readonly string[]).includes(panel.kind) ? `panel:${panel.kind}` : null;
+}
+
 export function PanelHost() {
   const panels = useApp((s) => s.panels);
   const top = panels[panels.length - 1];
+  useEffect(() => {
+    const key = usageKeyOf(top);
+    if (key) trackUse(key);
+  }, [top]);
   if (!top) return null;
   // 같은 종류 창을 다른 항목으로 바꿔 열면 새로 그린다(이전 항목의 입력값이 남지 않게 — 제미나이 검토)
   const id =

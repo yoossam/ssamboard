@@ -57,6 +57,7 @@ function checkConfig(config: Record<string, any> | undefined): Record<string, an
   // 스티커로 접기: 접힘 여부와 펼칠 때 돌아갈 크기
   if (config.collapsed !== undefined && typeof config.collapsed !== 'boolean') bad('접기 값이 잘못됐습니다.');
   if (config.expanded_layout !== undefined) config = { ...config, expanded_layout: checkLayout(config.expanded_layout) };
+  if (config.sticker_layout !== undefined) config = { ...config, sticker_layout: checkLayout(config.sticker_layout) };
   // 수업 자료 블록의 링크(https 만, 30개까지 — @jarvis/shared links.ts)
   if (config.items !== undefined) {
     const checked = checkLinkItems(config.items);

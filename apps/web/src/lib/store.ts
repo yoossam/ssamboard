@@ -23,7 +23,8 @@ export type Panel =
   | { kind: 'results' }
   | { kind: 'quiz'; quizId: string }
   | { kind: 'tuilders'; blockId: string }
-  | { kind: 'abilities' };
+  | { kind: 'abilities' }
+  | { kind: 'menu-drawer' };
 
 export type SettingsTab = 'general' | 'menu' | 'memory' | 'security' | 'connect' | 'devices' | 'drive' | 'data';
 export type AiLayout = 'modal' | 'panel';

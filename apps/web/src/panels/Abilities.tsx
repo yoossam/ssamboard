@@ -58,7 +58,12 @@ const WORK: Group[] = [
       { icon: 'plus', title: '블록 추가', desc: '할 일·일정·표·메모·내 메뉴·수업 자료 블록을 놓습니다.', panel: { kind: 'add-block' } },
       { icon: 'modal', title: '스티커로 접기', desc: '블록 ⋯ → 스티커로 접기: 제목만 남겨 자리만 차지하게 하고, 누르면 큰 창으로 봅니다.' },
       { icon: 'drag', title: '옮기기·크기·자리 고정', desc: '머리줄 왼쪽 손잡이(⠿)로 옮기고 모서리로 크기를 바꿉니다. 놓은 자리 그대로 있고, 자리 고정하면 밀리지 않습니다.' },
-      { icon: 'grid', title: '내 메뉴', desc: '자주 하는 일을 단추로 만들어 둡니다(보드마다 따로). AI 에게 추천받을 수도 있습니다.', panel: { kind: 'settings', tab: 'menu' } },
+      {
+        icon: 'grid',
+        title: '내 메뉴',
+        desc: "자주 쓰는 순으로 저절로 정리됩니다(하루 한 번). 자주 쓰는 기능은 '자동'으로 들어오고, 스티커를 누르면 오른쪽에 세로로 열립니다. 지울 수 없고 접어 둘 수 있어요.",
+        panel: { kind: 'menu-drawer' },
+      },
     ],
   },
 ];
@@ -100,7 +105,7 @@ const CLASS: Group[] = [
     title: '보드 꾸리기',
     items: [
       { icon: 'modal', title: '스티커로 접기', desc: '블록 ⋯ → 스티커로 접기: 제목만 남기고 누르면 큰 창. 교실 TV 에 띄울 때 깔끔합니다.' },
-      { icon: 'grid', title: '수업 메뉴', desc: '수업 보드에서 만든 메뉴는 수업 보드에만 보입니다.', panel: { kind: 'settings', tab: 'menu' } },
+      { icon: 'grid', title: '수업 메뉴', desc: '수업 보드의 내 메뉴는 수업 보드에서 쓴 기능으로만 따로 정리됩니다.', panel: { kind: 'menu-drawer' } },
     ],
   },
 ];

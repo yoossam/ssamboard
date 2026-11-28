@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import {
   boardKindOf,
+  featureKeyOf,
+  type MenuInfoDto,
+  USAGE_KEY_RE,
   type BoardKind,
   COLUMN_TYPES,
   MENU_ACTION_LABEL,
@@ -21,6 +24,7 @@ import {
 } from '@jarvis/shared';
 import type { UserRow } from '../auth/auth.types';
 import { boardKind } from '../common/board-context';
+import { RateLimiter } from '../common/rate-limit';
 import { bad, notFound } from '../common/http';
 import { Db, type Queryable } from '../db/db.service';
 import { LlmService } from '../llm/llm.service';
@@ -191,6 +195,36 @@ export function describeAction(a: MenuAction): string {
   }
 }
 
+const usageLimiter = new RateLimiter(60, 60_000);
+/** 이만큼 쓰면(최근 1주에 3번쯤) 자동 메뉴 후보 */
+const AUTO_MIN_SCORE = 2.5;
+const PANEL_ICON: Record<MenuPanel, MenuIcon> = {
+  notifications: 'bell',
+  tables: 'table',
+  upload: 'upload',
+  trash: 'archive',
+  'add-block': 'grid',
+  settings: 'key',
+  results: 'archive',
+  task: 'tasks',
+  event: 'calendar',
+};
+/** 기능 열쇠 → 자동 메뉴 모양. 지운 표·모르는 화면은 null */
+function autoDraft(key: string, tables: Map<string, string>): { label: string; icon: MenuIcon; action: MenuAction } | null {
+  if (key.startsWith('panel:')) {
+    const panel = key.slice(6) as MenuPanel;
+    if (!(MENU_PANELS as readonly string[]).includes(panel)) return null;
+    return { label: MENU_PANEL_LABEL[panel], icon: PANEL_ICON[panel], action: { type: 'open_panel', panel } };
+  }
+  if (key.startsWith('table:')) {
+    const id = key.slice(6);
+    const name = tables.get(id);
+    if (!name) return null;
+    return { label: name.slice(0, MENU_LABEL_MAX), icon: 'table', action: { type: 'open_table', table_id: id } };
+  }
+  return null;
+}
+
 @Injectable()
 export class MenusService {
   constructor(
@@ -201,7 +235,7 @@ export class MenusService {
 
   /** 지금 보드(업무·수업)의 메뉴 — 보드마다 따로(2026-11-28) */
   list(userId: string, q: Queryable = this.db, kind: BoardKind = boardKind()): Promise<MenuItemDto[]> {
-    return q.query<MenuItemDto>('select id, position, label, icon, description, action from menu_items where user_id = $1 and board_kind = $2 order by position, created_at', [userId, kind]);
+    return q.query<MenuItemDto>('select id, position, label, icon, description, action, auto from menu_items where user_id = $1 and board_kind = $2 order by position, created_at', [userId, kind]);
   }
 
   /** 사용자의 AI 열쇠로 추천받는다. 저장하지 않는다. */
@@ -319,6 +353,94 @@ export class MenusService {
   async remove(userId: string, id: string): Promise<void> {
     const r = await this.db.query('delete from menu_items where id = $1 and user_id = $2 returning id', [id, userId]);
     if (r.length === 0) notFound('메뉴');
+  }
+
+  // ── 자주 쓰는 순 자동 메뉴(2026-11-28) ──────────────────────────
+
+  /** 화면이 기능을 쓸 때 남긴다. 모르는 열쇠는 버린다. 너무 잦으면(분당 60) 조용히 무시. */
+  async track(userId: string, key: unknown, kind: BoardKind = boardKind()): Promise<void> {
+    if (typeof key !== 'string' || !USAGE_KEY_RE.test(key)) return;
+    if (!usageLimiter.allow(userId)) return;
+    if (key.startsWith('panel:') && !(MENU_PANELS as readonly string[]).includes(key.slice(6))) return;
+    await this.db.query('insert into usage_events(user_id, board_kind, key) values ($1, $2, $3)', [userId, kind, key]);
+  }
+
+  /** 지금 보드의 메뉴를 자주 쓰는 순으로. 하루가 지났으면(또는 force) 먼저 다시 정리한다. */
+  async listArranged(userId: string, force = false, kind: BoardKind = boardKind()): Promise<MenuItemDto[]> {
+    const due = await this.db.one<{ due: boolean }>("select (menu_arranged_at is null or menu_arranged_at < now() - interval '1 day') as due from boards where user_id = $1 and kind = $2", [
+      userId,
+      kind,
+    ]);
+    if (force || due?.due) await this.arrange(userId, kind);
+    const scores = await this.scores(userId, kind);
+    return (await this.list(userId, this.db, kind)).map((m) => ({ ...m, score: Math.round(this.menuScore(m, scores) * 10) / 10 }));
+  }
+
+  async info(userId: string, kind: BoardKind = boardKind()): Promise<MenuInfoDto> {
+    const r = await this.db.one<{ arranged_at: Date | null; auto_count: number }>(
+      'select b.menu_arranged_at as arranged_at, (select count(*)::int from menu_items m where m.user_id = $1 and m.board_kind = $2 and m.auto) as auto_count from boards b where b.user_id = $1 and b.kind = $2',
+      [userId, kind],
+    );
+    return { arranged_at: r?.arranged_at ? new Date(r.arranged_at).toISOString() : null, auto_count: r?.auto_count ?? 0 };
+  }
+
+  /** 열쇠별 점수: 최근 60일 동안 쓴 횟수를 14일마다 반으로 줄여 더한다(어제 쓴 것이 한 달 전보다 무겁다). */
+  private async scores(userId: string, kind: BoardKind, q: Queryable = this.db): Promise<Map<string, number>> {
+    const rows = await q.query<{ key: string; score: number }>(
+      `select key, sum(power(0.5, extract(epoch from (now() - at)) / 86400 / 14))::float as score
+       from usage_events where user_id = $1 and board_kind = $2 and at > now() - interval '60 days' group by key`,
+      [userId, kind],
+    );
+    return new Map(rows.map((r) => [r.key, Number(r.score) || 0]));
+  }
+
+  private menuScore(m: MenuItemDto, scores: Map<string, number>): number {
+    const feature = featureKeyOf(m.action);
+    return (scores.get(`menu:${m.id}`) ?? 0) + (feature ? (scores.get(feature) ?? 0) : 0);
+  }
+
+  /**
+   * 하루 한 번 정리: ① 자주 쓰는데 메뉴에 없는 기능(화면·표)을 '자동' 메뉴로 넣고(하루 3개까지, 자리가 없으면 점수 낮은 자동 메뉴와 바꿈)
+   * ② 모든 메뉴를 점수 순으로(같으면 원래 순서) 다시 세운다. 사용자가 만든 메뉴는 지우지 않는다(아래로 밀릴 뿐).
+   */
+  private async arrange(userId: string, kind: BoardKind): Promise<void> {
+    await this.db.tx(async (q) => {
+      await q.query("select pg_advisory_xact_lock(hashtext('menu-arrange:' || $1::text || $2::text))", [userId, kind]);
+      const scores = await this.scores(userId, kind, q);
+      // 저절로 넣은 메뉴 가운데 가리키던 표가 지워진 것은 뺀다(사용자가 만든 메뉴는 그대로)
+      await q.query(
+        "delete from menu_items m where m.user_id = $1 and m.board_kind = $2 and m.auto and m.action->>'type' in ('open_table', 'add_row') and not exists (select 1 from data_tables t where t.id::text = m.action->>'table_id' and t.deleted_at is null)",
+        [userId, kind],
+      );
+      let menus = await this.list(userId, q, kind);
+      const have = new Set(menus.map((m) => featureKeyOf(m.action)).filter(Boolean));
+      const tables = new Map((await q.query<{ id: string; name: string }>('select id, name from data_tables where user_id = $1 and deleted_at is null', [userId])).map((t) => [t.id, t.name]));
+      const candidates = [...scores.entries()]
+        .filter(([key, score]) => score >= AUTO_MIN_SCORE && !key.startsWith('menu:') && !have.has(key))
+        .map(([key, score]) => ({ key, score, draft: autoDraft(key, tables) }))
+        .filter((c): c is { key: string; score: number; draft: NonNullable<ReturnType<typeof autoDraft>> } => c.draft !== null)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 3);
+      for (const c of candidates) {
+        if (menus.length >= MENU_MAX) {
+          const autos = menus.filter((m) => m.auto).sort((a, b) => this.menuScore(a, scores) - this.menuScore(b, scores));
+          const weakest = autos[0];
+          if (!weakest || this.menuScore(weakest, scores) * 1.5 >= c.score) continue;
+          await q.query('delete from menu_items where id = $1 and user_id = $2', [weakest.id, userId]);
+          menus = menus.filter((m) => m.id !== weakest.id);
+        }
+        const made = await q.one<MenuItemDto>(
+          'insert into menu_items(user_id, position, label, icon, description, action, board_kind, auto) values ($1, 999, $2, $3, $4, $5::jsonb, $6, true) returning id, position, label, icon, description, action, auto',
+          [userId, c.draft.label, c.draft.icon, '자주 쓰는 기능이라 쌤보드가 넣었어요', JSON.stringify(c.draft.action), kind],
+        );
+        menus.push(made!);
+      }
+      const order = menus.map((m, i) => ({ id: m.id, s: this.menuScore(m, scores), i })).sort((a, b) => b.s - a.s || a.i - b.i);
+      for (const [pos, m] of order.entries()) await q.query('update menu_items set position = $3 where id = $1 and user_id = $2 and position <> $3', [m.id, userId, pos]);
+      await q.query('update boards set menu_arranged_at = now() where user_id = $1 and kind = $2', [userId, kind]);
+      // 오래된 기록은 정리(점수는 60일까지만 본다)
+      await q.query("delete from usage_events where user_id = $1 and at < now() - interval '90 days'", [userId]);
+    });
   }
 
   async reorder(userId: string, ids: unknown): Promise<void> {

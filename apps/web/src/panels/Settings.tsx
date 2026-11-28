@@ -646,7 +646,7 @@ function MenuTab({ settings }: { settings: SettingsDto }) {
                     }}
                   />
                 ) : (
-                  <button type="button" className="block max-w-full truncate text-left text-sm font-medium" title="눌러서 해 보기" onClick={() => runMenu(m.action)}>
+                  <button type="button" className="block max-w-full truncate text-left text-sm font-medium" title="눌러서 해 보기" onClick={() => runMenu(m.action, m.id)}>
                     {m.label}
                   </button>
                 )}

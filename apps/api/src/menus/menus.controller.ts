@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Put } from '@nestjs/common';
-import type { MenuItemDto, MenuRecommendation } from '@jarvis/shared';
+import type { MenuInfoDto, MenuItemDto, MenuRecommendation } from '@jarvis/shared';
 import { Auth, type AuthCtx } from '../auth/auth.types';
 import { uuid } from '../common/http';
 import { MenusService } from './menus.service';
@@ -9,9 +9,29 @@ import { MenusService } from './menus.service';
 export class MenusController {
   constructor(private readonly menus: MenusService) {}
 
+  /** 지금 보드의 메뉴 — 자주 쓰는 순(하루 한 번 다시 정리) */
   @Get()
   list(@Auth() ctx: AuthCtx): Promise<MenuItemDto[]> {
-    return this.menus.list(ctx.user.id);
+    return this.menus.listArranged(ctx.user.id);
+  }
+
+  /** 자동 정리 상태(마지막 정리 때·자동 메뉴 수) */
+  @Get('info')
+  info(@Auth() ctx: AuthCtx): Promise<MenuInfoDto> {
+    return this.menus.info(ctx.user.id);
+  }
+
+  /** [지금 다시 정리] */
+  @Post('arrange')
+  arrange(@Auth() ctx: AuthCtx): Promise<MenuItemDto[]> {
+    return this.menus.listArranged(ctx.user.id, true);
+  }
+
+  /** 기능을 쓸 때 화면이 남기는 기록(자주 쓰는 순 정리에 쓴다) */
+  @Post('usage')
+  async usage(@Auth() ctx: AuthCtx, @Body() body: any): Promise<{ ok: true }> {
+    await this.menus.track(ctx.user.id, body?.key);
+    return { ok: true };
   }
 
   /** 관리하고 싶은 것을 적으면 AI 가 정리해 메뉴를 추천한다(저장하지 않음). */

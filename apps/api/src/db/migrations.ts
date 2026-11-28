@@ -445,4 +445,20 @@ alter table menu_items add column board_kind text not null default 'work' check 
 create index menu_items_user_board on menu_items(user_id, board_kind, position);
 `,
   },
+  {
+    // 자주 쓰는 순 자동 메뉴(2026-11-28 선생님): 기능을 쓸 때마다 남기는 기록, 저절로 넣은 메뉴 표시, 보드마다 마지막으로 정리한 때.
+    name: '013_menu_usage',
+    sql: /* sql */ `
+create table usage_events (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  board_kind text not null default 'work' check (board_kind in ('work', 'class')),
+  key text not null,
+  at timestamptz not null default now()
+);
+create index usage_events_user on usage_events(user_id, board_kind, at);
+alter table menu_items add column auto boolean not null default false;
+alter table boards add column menu_arranged_at timestamptz;
+`,
+  },
 ];

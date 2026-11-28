@@ -87,9 +87,12 @@ export async function toggleCollapse(block: BlockDto): Promise<void> {
   const cur = block.layout_lg;
   const collapsing = !isCollapsed(block.config);
   const was = block.config.expanded_layout as GridPos | undefined;
-  const size = collapsing ? STICKER_SIZE : { w: was?.w ?? DEFAULT_BLOCK_SIZE[block.type].w, h: was?.h ?? DEFAULT_BLOCK_SIZE[block.type].h };
-  const layout_lg: GridPos = { x: Math.max(0, Math.min(cur.x, GRID_COLS - size.w)), y: cur.y, w: size.w, h: size.h };
-  const config = collapsing ? { collapsed: true, expanded_layout: cur } : { collapsed: false };
+  // 펼칠 때 스티커 자리·크기를 기억해 두었다가 다시 접으면 그 자리로 돌아간다(2026-11-28 선생님)
+  const sticker = block.config.sticker_layout as GridPos | undefined;
+  const size = collapsing ? { w: sticker?.w ?? STICKER_SIZE.w, h: sticker?.h ?? STICKER_SIZE.h } : { w: was?.w ?? DEFAULT_BLOCK_SIZE[block.type].w, h: was?.h ?? DEFAULT_BLOCK_SIZE[block.type].h };
+  const at = collapsing && sticker ? sticker : cur;
+  const layout_lg: GridPos = { x: Math.max(0, Math.min(at.x, GRID_COLS - size.w)), y: at.y, w: size.w, h: size.h };
+  const config = collapsing ? { collapsed: true, expanded_layout: cur } : { collapsed: false, sticker_layout: cur };
   patchBoard((blocks) => blocks.map((b) => (b.id === block.id ? { ...b, layout_lg, config: { ...b.config, ...config } } : b)));
   try {
     await api.patch(`/blocks/${block.id}`, { config, layout_lg });
@@ -125,7 +128,7 @@ function StickerCard({ block }: { block: BlockDto }) {
         type="button"
         className="no-drag flex min-w-0 flex-1 items-center gap-[0.4em] self-stretch text-left leading-none"
         title="눌러서 크게 보기"
-        onClick={() => open({ kind: 'block', blockId: block.id })}
+        onClick={() => open(block.type === 'menu' ? { kind: 'menu-drawer' } : { kind: 'block', blockId: block.id })}
       >
         <Icon name={BLOCK_ICON[block.type]} size={Math.round(font * 1.1)} className="shrink-0 text-accent" />
         <span data-title-color={titlePaint(block.config.title_color).attr} style={titlePaint(block.config.title_color).style} className="min-w-0 truncate font-bold">
@@ -133,6 +136,10 @@ function StickerCard({ block }: { block: BlockDto }) {
         </span>
         <BlockCount block={block} />
       </button>
+      {/* 접어 둔 채로도 색을 바꾼다(2026-11-28 선생님) — 블록 ⋯ 의 꾸미기와 같은 창 */}
+      <span className="no-drag flex shrink-0">
+        <BlockStyleButton block={block} label="색 바꾸기(바탕·제목)" className="flex size-8 shrink-0 items-center justify-center rounded-lg text-ink/60 hover:bg-black/5 hover:text-ink" />
+      </span>
       <IconButton icon="expand" label="펼치기" size={Math.max(28, Math.min(40, Math.round(font * 1.6)))} className="no-drag" onClick={() => void toggleCollapse(block)} />
     </article>
   );

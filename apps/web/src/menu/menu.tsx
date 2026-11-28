@@ -2,17 +2,62 @@
  * 내 메뉴(2026-11-28): 위쪽 바로가기 줄, 메뉴 누르기, AI 추천 화면.
  * 메뉴의 틀(동작 다섯 가지)은 @jarvis/shared menu.ts, 서버 검사는 apps/api/src/menus/menus.service.ts.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { MENU_ACTION_LABEL, MENU_PANEL_LABEL, type MenuAction, type MenuDraft, type MenuItemDto, type MenuRecommendation, type TableDto } from '@jarvis/shared';
 import { Icon } from '../components/Icon';
 import { Button, ButtonRow, Notice, Tag, inputClass, useIsPhone } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
-import { refresh, useBoard, useMenus, useTables } from '../lib/data';
+import { refresh, useBoard, useMenuInfo, useMenus, useTables } from '../lib/data';
 import { useApp } from '../lib/store';
+import { trackUse } from '../lib/usage';
+
+/** '언제 정리했나' 를 사람 말로 */
+function arrangedWhen(iso: string | null): string {
+  if (!iso) return '아직 정리 전';
+  const d = new Date(iso);
+  const days = Math.floor((new Date().setHours(0, 0, 0, 0) - new Date(d).setHours(0, 0, 0, 0)) / 86_400_000);
+  const hm = d.toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' });
+  return days <= 0 ? `오늘 ${hm} 정리` : days === 1 ? `어제 ${hm} 정리` : `${d.getMonth() + 1}월 ${d.getDate()}일 정리`;
+}
+
+/**
+ * 자동 정리 알림(2026-11-28 선생님 "자동 최신화된다는 걸 메뉴에서 알려 주면"): 자주 쓰는 순으로 하루 한 번 저절로 바뀐다는 것과 마지막으로 정리한 때.
+ * compact 는 블록 위쪽 한 줄용.
+ */
+export function MenuAutoNote({ compact = false }: { compact?: boolean }) {
+  const { data: info } = useMenuInfo();
+  const when = arrangedWhen(info?.arranged_at ?? null);
+  const autos = info?.auto_count ? ` · 자동 ${info.auto_count}개` : '';
+  if (compact)
+    return (
+      <p data-menu-auto-note className="mb-1.5 flex items-center gap-1.5 truncate text-xs text-sub" title="쓴 만큼 하루 한 번 저절로 순서가 바뀌고, 자주 쓰는 기능은 '자동'으로 들어와요">
+        <Icon name="refresh" size={12} className="shrink-0 text-accent" />
+        <span className="truncate">
+          자주 쓰는 순 자동 정리 · {when}
+          {autos}
+        </span>
+      </p>
+    );
+  return (
+    <div data-menu-auto-note className="mx-3 mt-3 flex shrink-0 gap-2.5 rounded-xl bg-tint px-3 py-2.5">
+      <Icon name="refresh" size={18} className="mt-0.5 shrink-0 text-accent" />
+      <div className="min-w-0 text-xs leading-relaxed">
+        <p className="font-bold text-accent">
+          자동으로 최신화돼요 · {when}
+          {autos}
+        </p>
+        <p className="mt-0.5 text-sub">
+          하루 한 번 쓴 만큼 정리해서 자주 쓰는 메뉴는 위로, 안 쓰는 메뉴는 아래로 가요. 자주 쓰는 화면·표는 <b>자동</b> 표시를 달고 저절로 들어와요.
+        </p>
+      </div>
+    </div>
+  );
+}
 
 /** 메뉴를 눌렀을 때 */
-export function runMenu(action: MenuAction): void {
+export function runMenu(action: MenuAction, menuId?: string): void {
   const app = useApp.getState();
+  if (menuId) trackUse(`menu:${menuId}`);
   switch (action.type) {
     case 'ask_ai':
       app.openAi(action.prompt);
@@ -70,17 +115,19 @@ export function MenuBlockBody() {
   const items = menus ?? [];
   return (
     <div className="h-full overflow-auto p-2">
+      <MenuAutoNote compact />
       <div className="grid gap-1.5 [grid-template-columns:repeat(auto-fill,minmax(8.5rem,1fr))]">
         {items.map((m) => (
           <button
             key={m.id}
             type="button"
             title={m.description || m.label}
-            onClick={() => runMenu(m.action)}
+            onClick={() => runMenu(m.action, m.id)}
             className="flex min-h-11 min-w-0 items-center gap-2 rounded-lg border bg-card px-2.5 text-left text-sm font-medium transition hover:bg-tint active:scale-[0.98]"
           >
             <Icon name={m.icon} size={16} className="shrink-0 text-accent" />
             <span className="min-w-0 flex-1 truncate">{m.label}</span>
+            {m.auto && <span className="shrink-0 rounded-full bg-tint px-1.5 text-[11px] text-accent">자동</span>}
             {m.action.type === 'ask_ai' && <Icon name="sparkle" size={12} className="shrink-0 text-sub" />}
           </button>
         ))}
@@ -93,6 +140,79 @@ export function MenuBlockBody() {
           {isLoading ? '불러오는 중…' : items.length === 0 ? '내 메뉴 만들기' : '메뉴 고치기'}
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * 내 메뉴 세로 서랍(2026-11-28 선생님 "스티커로 접고 누르면 우측에 세로로"): 오른쪽 가장자리에 자주 쓰는 순으로 세로로.
+ * 누르면 그 일을 하고 닫힌다. 순서는 서버가 하루 한 번 쓴 만큼 다시 정하고(자주 쓰는 것 위로), 자주 쓰는 기능은 '자동'으로 들어온다.
+ */
+export function MenuDrawer() {
+  const { data: menus, isLoading } = useMenus();
+  const close = useApp((s) => s.close);
+  const replace = useApp((s) => s.replace);
+  const toast = useApp((s) => s.toast);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [close]);
+  const items = menus ?? [];
+  const rearrange = async () => {
+    setBusy(true);
+    try {
+      await api.post('/menus/arrange', {});
+      await refresh('menus');
+      toast('자주 쓰는 순으로 다시 정리했어요');
+    } catch (e) {
+      toast(errorMessage(e), 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="anim-fade fixed inset-0 z-40 bg-scrim/40" onMouseDown={(e) => e.target === e.currentTarget && close()}>
+      <aside role="dialog" aria-modal="true" aria-label="내 메뉴" data-menu-drawer className="absolute top-0 right-0 flex h-full w-[min(320px,86vw)] flex-col border-l bg-card shadow-xl">
+        <header className="flex h-14 shrink-0 items-center gap-2 border-b border-rule pr-1.5 pl-4">
+          <Icon name="grid" className="text-accent" />
+          <h2 className="min-w-0 flex-1 truncate text-base font-bold">내 메뉴</h2>
+          <button type="button" aria-label="닫기" onClick={close} className="flex size-10 items-center justify-center rounded-[10px] text-sub hover:bg-ground">
+            <Icon name="close" />
+          </button>
+        </header>
+        <MenuAutoNote />
+        <nav className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-3">
+          {isLoading && <p className="p-2 text-sm text-sub">불러오는 중…</p>}
+          {!isLoading && items.length === 0 && <p className="p-2 text-sm text-sub">아직 메뉴가 없어요. 쌤보드를 쓰다 보면 자주 쓰는 기능이 여기 들어와요.</p>}
+          {items.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              title={m.description || m.label}
+              onClick={() => {
+                close();
+                runMenu(m.action, m.id);
+              }}
+              className="flex min-h-12 w-full items-center gap-3 rounded-xl border bg-card px-3 text-left transition hover:border-accent hover:bg-tint active:scale-[0.99]"
+            >
+              <Icon name={m.icon} size={20} className="shrink-0 text-accent" />
+              <span className="min-w-0 flex-1 truncate text-[15px] font-medium">{m.label}</span>
+              {m.auto && <span className="shrink-0 rounded-full bg-tint px-2 py-0.5 text-xs text-accent">자동</span>}
+              {m.action.type === 'ask_ai' && <Icon name="sparkle" size={12} className="shrink-0 text-sub" />}
+            </button>
+          ))}
+        </nav>
+        <footer className="grid shrink-0 grid-cols-2 gap-2 border-t border-rule p-3">
+          <Button icon="refresh" disabled={busy} onClick={() => void rearrange()}>
+            {busy ? '정리 중…' : '다시 정리'}
+          </Button>
+          <Button icon="settings" onClick={() => replace({ kind: 'settings', tab: 'menu' })}>
+            메뉴 고치기
+          </Button>
+        </footer>
+      </aside>
     </div>
   );
 }
@@ -112,7 +232,7 @@ export function MenuBar() {
           key={m.id}
           type="button"
           title={m.description || m.label}
-          onClick={() => runMenu(m.action)}
+          onClick={() => runMenu(m.action, m.id)}
           className="flex h-8 shrink-0 items-center gap-1.5 rounded-full border bg-card px-3 text-sm whitespace-nowrap transition hover:bg-tint active:scale-[0.98]"
         >
           <Icon name={m.icon} size={16} className="text-sub" />

@@ -6,6 +6,7 @@ import {
   GRID_COLS,
   GRID_MAX_H,
   placeBlock,
+  STICKER_SIZE,
   linksSignature,
   type BlockDto,
   type BlockType,
@@ -88,7 +89,22 @@ export class BoardsService {
 
   async getBoard(userId: string): Promise<BoardDto> {
     const board = await this.currentBoard(userId);
-    return { ...board, blocks: await this.listBlocks(userId) };
+    let blocks = await this.listBlocks(userId, this.db, board.kind);
+    // 내 메뉴 블록이 없으면 스티커로 하나 놓는다(보드마다 늘 하나 — 지울 수 없음)
+    if (!blocks.some((b) => b.type === 'menu')) {
+      await this.db.tx(async (q) => {
+        await q.query("select pg_advisory_xact_lock(hashtext('menu-block:' || $1::text))", [board.id]);
+        if (await q.one("select 1 as hit from blocks where board_id = $1 and type = 'menu' and deleted_at is null", [board.id])) return;
+        const placed = placeBlock(
+          blocks.map((b) => b.layout_lg),
+          STICKER_SIZE,
+          null,
+        );
+        await this.createBlock(userId, { type: 'menu', config: { collapsed: true, expanded_layout: { ...placed, ...DEFAULT_BLOCK_SIZE.menu } }, layout_lg: placed }, q, null, board.id);
+      });
+      blocks = await this.listBlocks(userId, this.db, board.kind);
+    }
+    return { ...board, blocks };
   }
 
   async createBlock(userId: string, input: NewBlock, q: Queryable = this.db, commandId: string | null = null, boardId?: string): Promise<BlockDto> {
@@ -155,6 +171,9 @@ export class BoardsService {
 
   /** 삭제는 휴지통으로 보낸다(30일 보관). */
   async deleteBlock(userId: string, id: string, q: Queryable = this.db): Promise<boolean> {
+    // 내 메뉴 블록은 보드마다 하나, 지우지 않는다(자주 쓰는 순 자동 메뉴가 사는 곳 — 2026-11-28). 접어 둘 수는 있다.
+    if ((await q.one<{ type: string }>('select type from blocks where id = $1 and user_id = $2 and deleted_at is null', [id, userId]))?.type === 'menu')
+      bad('내 메뉴 블록은 지울 수 없어요. ⋯ → 스티커로 접어 두세요.');
     const rows = await q.query('update blocks set deleted_at = now(), updated_at = now() where id = $1 and user_id = $2 and deleted_at is null returning id', [id, userId]);
     return rows.length > 0;
   }
