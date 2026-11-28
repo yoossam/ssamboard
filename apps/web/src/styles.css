@@ -176,6 +176,10 @@ body.react-draggable-transparent-selection .view-frame {
   --memo-bg: #ffffff;
   --memo-bar: #e3e7ee;
 }
+/* 고른 색이 어두우면(paintOf dark) 강조색이 밝아지므로, 강조색 바탕 단추의 글자는 어둡게 */
+[data-dark] .bg-accent {
+  color: #1f2937;
+}
 .memo-paper {
   background: var(--memo-bg);
   border-color: var(--memo-bar);

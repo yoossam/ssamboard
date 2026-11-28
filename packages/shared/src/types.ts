@@ -102,6 +102,54 @@ export const titleColor = (v: unknown): TitleColor => ((TITLE_COLORS as readonly
 export const blockBg = (block: { type: string; config: Record<string, any> }): MemoColor =>
   block.type === 'memo' ? memoColor(block.config.color) : (MEMO_COLORS as readonly unknown[]).includes(block.config.bg) ? (block.config.bg as MemoColor) : 'white';
 
+/**
+ * 마음대로 고른 색(2026-11-28 선생님 "블록 색깔도 자유자재로"): '#rrggbb'. 바탕(config.bg·메모 config.color)과 제목(config.title_color)에.
+ * 정해 둔 이름(MEMO_COLORS·TITLE_COLORS)도 그대로 받는다. 어두운 바탕이면 글자를 밝게 바꿔 읽히게 한다.
+ */
+export const isHexColor = (v: unknown): v is string => typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v);
+const rgb = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+const toHex = (c: number[]) =>
+  `#${c
+    .map((x) =>
+      Math.round(Math.max(0, Math.min(255, x)))
+        .toString(16)
+        .padStart(2, '0'),
+    )
+    .join('')}`;
+/** 상대 밝기(0~1, WCAG) */
+export function luminance(hex: string): number {
+  const [r, g, b] = rgb(hex).map((v) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+}
+/** 블록을 칠하는 법: data-memo 이름(정해 둔 색) 또는 CSS 변수(고른 색). paper 면 종이 바탕 클래스를 쓴다. */
+export function paintOf(block: { type: string; config: Record<string, any> }): { memo?: string; paper: boolean; dark?: boolean; style?: Record<string, string> } {
+  const raw = block.type === 'memo' ? block.config.color : block.config.bg;
+  if (isHexColor(raw)) {
+    const dark = luminance(raw) < 0.22;
+    const bar = toHex(rgb(raw).map((v) => (dark ? v + (255 - v) * 0.18 : v * 0.86)));
+    return {
+      memo: 'custom',
+      paper: true,
+      dark,
+      style: {
+        '--memo-bg': raw,
+        '--memo-bar': bar,
+        ...(dark ? { '--color-ink': '#ffffff', '--color-sub': 'rgba(255,255,255,0.78)', '--color-rule': 'rgba(255,255,255,0.22)', '--color-accent': '#ffe28a' } : {}),
+      },
+    };
+  }
+  const name = block.type === 'memo' ? memoColor(raw) : blockBg(block);
+  const paper = block.type === 'memo' || name !== 'white';
+  return { memo: paper ? name : undefined, paper };
+}
+/** 제목 글자색: 정해 둔 이름이면 data-title-color, 고른 색이면 style */
+export function titlePaint(v: unknown): { attr?: TitleColor; style?: { color: string } } {
+  return isHexColor(v) ? { style: { color: v } } : { attr: titleColor(v) };
+}
+
 /** 보드 전체 바탕(boards.theme.bg). 색 값은 styles.css 의 [data-board-bg]. */
 export const BOARD_BGS = ['gray', 'white', 'cream', 'mint', 'sky', 'lavender', 'peach', 'slate'] as const;
 export type BoardBg = (typeof BOARD_BGS)[number];

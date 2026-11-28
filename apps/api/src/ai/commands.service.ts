@@ -7,6 +7,7 @@ import {
   BLOCK_TYPES,
   checkFormSpec,
   checkQuizSpec,
+  isHexColor,
   checkLinkItems,
   LINK_KIND_LABEL,
   LINKS_MAX,
@@ -347,12 +348,12 @@ export class CommandsService {
         if (typeof input.text === 'string') out.text = input.text.slice(0, 5000);
         if (input.color !== undefined) {
           if (type !== 'memo') return fail('color는 type이 memo일 때만 쓸 수 있습니다.');
-          if (!isMemoColor(input.color)) return fail(`color는 ${MEMO_COLORS.join(', ')} 중 하나입니다.`);
+          if (!isMemoColor(input.color) && !isHexColor(input.color)) return fail(`color는 ${MEMO_COLORS.join(', ')} 중 하나이거나 #rrggbb 색입니다.`);
           out.color = input.color;
         }
         out.title = title || BLOCK_LABEL[type];
         const where = out.position ? ` · ${HINT_LABEL[out.position as PlaceHint]}` : '';
-        const paper = out.color ? ` · ${MEMO_COLOR_LABEL[out.color as MemoColor]}` : '';
+        const paper = out.color ? ` · ${isHexColor(out.color) ? out.color : MEMO_COLOR_LABEL[out.color as MemoColor]}` : '';
         return {
           ok: true,
           step: {
@@ -385,12 +386,15 @@ export class CommandsService {
         if (hint(input.position)) notes.push(`${HINT_LABEL[(patch.position = hint(input.position)!)]}로 이동`);
         if (input.color !== undefined) {
           // 메모는 종이 색(config.color), 다른 블록은 바탕(config.bg) — 반영할 때 나눈다(2026-11-27 꾸미기).
-          if (!isMemoColor(input.color)) return fail(`color는 ${MEMO_COLORS.join(', ')} 중 하나입니다.`);
-          notes.push(`바탕 → ${MEMO_COLOR_LABEL[(patch.color = input.color as MemoColor)]}`);
+          if (!isMemoColor(input.color) && !isHexColor(input.color)) return fail(`color는 ${MEMO_COLORS.join(', ')} 중 하나이거나 #rrggbb 색입니다.`);
+          patch.color = input.color;
+          notes.push(`바탕 → ${isHexColor(input.color) ? input.color : MEMO_COLOR_LABEL[input.color as MemoColor]}`);
         }
         if (input.title_color !== undefined) {
-          if (!(TITLE_COLORS as readonly unknown[]).includes(input.title_color)) return fail(`title_color는 ${TITLE_COLORS.join(', ')} 중 하나입니다.`);
-          notes.push(`제목 색 → ${TITLE_COLOR_LABEL[(patch.title_color = input.title_color as TitleColor)]}`);
+          if (!(TITLE_COLORS as readonly unknown[]).includes(input.title_color) && !isHexColor(input.title_color))
+            return fail(`title_color는 ${TITLE_COLORS.join(', ')} 중 하나이거나 #rrggbb 색입니다.`);
+          patch.title_color = input.title_color;
+          notes.push(`제목 색 → ${isHexColor(input.title_color) ? input.title_color : TITLE_COLOR_LABEL[input.title_color as TitleColor]}`);
         }
         // 할 일·일정·알림 블록의 보여 줄 내용(2026-11-28)
         if (input.task_filter !== undefined) {

@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import {
+  paintOf,
   eventDaysOf,
   EVENT_DAYS_LABEL,
   memoColor,
@@ -492,7 +493,7 @@ function MemoBody({ block }: { block: BlockDto }) {
   useEffect(() => () => void save(latest.current), []);
 
   return (
-    <div data-memo={memoColor(block.config.color)} className="memo-paper flex min-h-0 flex-1 flex-col">
+    <div data-memo={paintOf(block).memo} data-dark={paintOf(block).dark ? '' : undefined} style={paintOf(block).style as CSSProperties | undefined} className="memo-paper flex min-h-0 flex-1 flex-col">
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}

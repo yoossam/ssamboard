@@ -21,7 +21,10 @@ import type { LlmTool } from '../llm/adapter';
 
 const iso = '오프셋이 붙은 ISO 8601 시각(예: 2026-11-26T15:00:00+09:00). 사용자의 시간대 기준으로 계산한다.';
 const position = { type: 'string', enum: PLACE_HINTS, description: '보드에서 놓을 모서리. 사용자가 위치를 말했을 때만 쓴다.' };
-const memoColor = { type: 'string', enum: [...MEMO_COLORS], description: '메모(붙임쪽지) 종이 색. yellow 노랑, pink 분홍, green 초록, blue 파랑, purple 보라, orange 주황, white 하양' };
+const memoColor = {
+  type: 'string',
+  description: `바탕(메모는 종이) 색. ${MEMO_COLORS.join(', ')}(노랑·분홍·초록·파랑·보라·주황·하양) 또는 #rrggbb 로 원하는 색(예: "남색"이면 #1e3a8a). 어두운 바탕이면 글자는 저절로 밝아진다`,
+};
 const viewCode = {
   type: 'string',
   description: '화면 블록(type: view)의 그리기 코드(자바스크립트). function render(data, size)를 정의하고 HTML·SVG 글자를 돌려준다. 쓰는 법은 시스템 안내의 "화면 블록"을 따른다.',
@@ -213,7 +216,7 @@ export const WRITE_TOOLS: LlmTool[] = [
         title: { type: 'string' },
         pinned: { type: 'boolean' },
         color: memoColor,
-        title_color: { type: 'string', enum: [...TITLE_COLORS] },
+        title_color: { type: 'string', description: `제목 글자색: ${TITLE_COLORS.join(', ')} 또는 #rrggbb(원하는 색)` },
         code: viewCode,
         css: viewCss,
         data: viewData,

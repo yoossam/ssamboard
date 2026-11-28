@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import {
+  paintOf,
+  titlePaint,
   qrMatrix,
   BLOCK_TYPES,
   DEFAULT_BLOCK_SIZE,
@@ -427,5 +429,24 @@ describe('QR 코드', () => {
   it('214바이트가 넘으면 만들지 않는다', () => {
     assert.ok(qrMatrix('x'.repeat(213)));
     assert.equal(qrMatrix('x'.repeat(214)), null);
+  });
+});
+
+describe('블록 색 직접 고르기', () => {
+  it('정해 둔 이름·고른 색 모두 칠하고, 어두운 바탕이면 글자를 밝게', () => {
+    assert.deepEqual(paintOf({ type: 'tasks', config: {} }), { memo: undefined, paper: false });
+    assert.equal(paintOf({ type: 'tasks', config: { bg: 'pink' } }).memo, 'pink');
+    assert.equal(paintOf({ type: 'memo', config: {} }).memo, 'yellow');
+    const light = paintOf({ type: 'tasks', config: { bg: '#ffeecc' } });
+    assert.equal(light.memo, 'custom');
+    assert.equal(light.style?.['--memo-bg'], '#ffeecc');
+    assert.equal(light.style?.['--color-ink'], undefined);
+    const dark = paintOf({ type: 'memo', config: { color: '#1e3a8a' } });
+    assert.equal(dark.style?.['--color-ink'], '#ffffff');
+    // 이상한 값은 칠하지 않는다(CSS 로 새지 않게)
+    assert.equal(paintOf({ type: 'tasks', config: { bg: 'red;background:url(x)' } }).style, undefined);
+    assert.deepEqual(titlePaint('#ff0000'), { style: { color: '#ff0000' } });
+    assert.deepEqual(titlePaint('teal'), { attr: 'teal' });
+    assert.deepEqual(titlePaint('url(x)'), { attr: 'default' });
   });
 });

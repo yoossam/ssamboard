@@ -17,6 +17,8 @@ import {
   isCollapsed,
   STICKER_SIZE,
   DEFAULT_BLOCK_SIZE,
+  paintOf,
+  titlePaint,
 } from '@jarvis/shared';
 import { BLOCK_ICON, Icon } from '../components/Icon';
 import { Button, CountBadge, Empty, IconButton, useIsPhone, useSize } from '../components/ui';
@@ -59,7 +61,7 @@ const toItems = (blocks: BlockDto[]): Item[] =>
   blocks.map((b) => {
     const min = isCollapsed(b.config) ? { w: 2, h: 1 } : (MIN_BLOCK_SIZE[b.type] ?? MIN_BLOCK_SIZE.tasks);
     // 자리 고정한 블록은 움직이지 않는다 — 다른 블록에 밀리지도 않는다(static)
-    return { i: b.id, ...b.layout_lg, minW: min.w, minH: min.h, isDraggable: !b.pinned, isResizable: !b.pinned && !isCollapsed(b.config), static: b.pinned };
+    return { i: b.id, ...b.layout_lg, minW: min.w, minH: min.h, isDraggable: !b.pinned, isResizable: !b.pinned, static: b.pinned };
   });
 const samePos = (a: GridPos, b: GridPos) => a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
 
@@ -98,27 +100,40 @@ export async function toggleCollapse(block: BlockDto): Promise<void> {
   }
 }
 
-/** 접힌 블록(스티커): 아이콘·제목·건수만. 누르면 크게 보기 창, [펼치기]로 원래 크기. */
+/**
+ * 접힌 블록(스티커): 아이콘·제목·건수만. 누르면 크게 보기 창, [펼치기]로 원래 크기.
+ * 모서리로 크기를 바꿀 수 있고, 글자는 스티커 높이에 맞춰 커지고 작아진다(2026-11-28 선생님).
+ */
 function StickerCard({ block }: { block: BlockDto }) {
   const open = useApp((s) => s.open);
   const isSelected = useApp((s) => s.selected.includes(block.id));
   const lit = useApp((s) => s.highlight.includes(block.id));
-  const memo = block.type === 'memo';
-  const bg = memo ? memoColor(block.config.color) : blockBg(block);
+  const [ref, size] = useSize<HTMLElement>();
+  const paint = paintOf(block);
+  // 높이의 약 40%(14~56px), 아주 좁으면 너비로도 줄인다
+  const font = size.height ? Math.round(Math.max(14, Math.min(56, size.height * 0.42, size.width / 9))) : 16;
   return (
     <article
-      data-memo={memo || bg !== 'white' ? bg : undefined}
-      className={`flex h-full items-center gap-1.5 overflow-hidden rounded-xl border pr-1 pl-2 shadow-sm ${memo || bg !== 'white' ? 'memo-paper' : 'bg-card'} ${ringOf(isSelected, lit)}`}
+      ref={ref}
+      data-memo={paint.memo}
+      data-dark={paint.dark ? '' : undefined}
+      style={{ ...paint.style, fontSize: font } as CSSProperties}
+      className={`flex h-full items-center gap-1 overflow-hidden rounded-xl border pr-0.5 pl-1.5 shadow-sm text-ink ${paint.paper ? 'memo-paper' : 'bg-card'} ${ringOf(isSelected, lit)}`}
     >
       <Grip block={block} />
-      <button type="button" className="no-drag flex min-w-0 flex-1 items-center gap-2 self-stretch text-left" title="눌러서 크게 보기" onClick={() => open({ kind: 'block', blockId: block.id })}>
-        <Icon name={BLOCK_ICON[block.type]} size={20} className="shrink-0 text-accent" />
-        <span data-title-color={titleColor(block.config.title_color)} className="min-w-0 truncate text-base font-bold">
+      <button
+        type="button"
+        className="no-drag flex min-w-0 flex-1 items-center gap-[0.4em] self-stretch text-left leading-none"
+        title="눌러서 크게 보기"
+        onClick={() => open({ kind: 'block', blockId: block.id })}
+      >
+        <Icon name={BLOCK_ICON[block.type]} size={Math.round(font * 1.1)} className="shrink-0 text-accent" />
+        <span data-title-color={titlePaint(block.config.title_color).attr} style={titlePaint(block.config.title_color).style} className="min-w-0 truncate font-bold">
           {block.title}
         </span>
         <BlockCount block={block} />
       </button>
-      <IconButton icon="expand" label="펼치기" size={32} className="no-drag" onClick={() => void toggleCollapse(block)} />
+      <IconButton icon="expand" label="펼치기" size={Math.max(28, Math.min(40, Math.round(font * 1.6)))} className="no-drag" onClick={() => void toggleCollapse(block)} />
     </article>
   );
 }
@@ -160,8 +175,17 @@ function TopBar() {
         {!phone && <span className="min-w-0 shrink-0 truncate text-xs text-sub">{dateLabel(new Date())}</span>}
         {/* 내 메뉴(위쪽 바로가기) — 휴대폰은 아래 한 줄 */}
         {phone ? <span className="flex-1" /> : <MenuBar />}
-        {/* 할 수 있는 일(지금 보드에서 되는 일 모음) */}
-        <IconButton icon="info" label="할 수 있는 일" size={36} onClick={() => open({ kind: 'abilities' })} />
+        {/* 도움말: 지금 보드에서 할 수 있는 일(2026-11-28 선생님 "직관적으로 도움말이라고") */}
+        <button
+          type="button"
+          onClick={() => open({ kind: 'abilities' })}
+          aria-label="도움말"
+          title="지금 보드에서 할 수 있는 일"
+          className="flex h-9 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-sm font-medium text-ink hover:bg-tint"
+        >
+          <Icon name="info" size={18} className="text-accent" />
+          {!phone && '도움말'}
+        </button>
         <ResultsButton />
         <BoardStyleButton />
         <IconButton icon="more" label="더보기" size={36} onClick={() => open({ kind: 'more' })} />
@@ -363,13 +387,14 @@ function MemoCard({ block }: { block: BlockDto }) {
   return (
     <article
       ref={ref}
-      data-memo={memoColor(block.config.color)}
-      style={{ '--fs': blockScale(size) } as CSSProperties}
-      className={`memo-card memo-paper block-scale flex h-full flex-col overflow-hidden rounded-xl border shadow-sm ${ringOf(isSelected, lit)}`}
+      data-memo={paintOf(block).memo}
+      data-dark={paintOf(block).dark ? '' : undefined}
+      style={{ ...paintOf(block).style, '--fs': blockScale(size) } as CSSProperties}
+      className={`memo-card memo-paper text-ink block-scale flex h-full flex-col overflow-hidden rounded-xl border shadow-sm ${ringOf(isSelected, lit)}`}
     >
       <header className="memo-bar flex h-9 shrink-0 items-center gap-1 pr-0.5 pl-2">
         <Grip block={block} />
-        <h2 data-title-color={titleColor(block.config.title_color)} className="min-w-0 flex-1 truncate text-[calc(15px*var(--fs,1))] font-bold">
+        <h2 data-title-color={titlePaint(block.config.title_color).attr} style={titlePaint(block.config.title_color).style} className="min-w-0 flex-1 truncate text-[calc(15px*var(--fs,1))] font-bold">
           {block.title}
         </h2>
         <BlockTools block={block} />
@@ -382,19 +407,20 @@ function MemoCard({ block }: { block: BlockDto }) {
 function BlockCard({ block }: { block: BlockDto }) {
   const isSelected = useApp((s) => s.selected.includes(block.id));
   const lit = useApp((s) => s.highlight.includes(block.id));
-  const bg = blockBg(block);
+  const paint = paintOf(block);
   const [ref, size] = useSize<HTMLElement>();
   return (
     <article
       ref={ref}
-      data-memo={bg === 'white' ? undefined : bg}
-      style={{ '--fs': blockScale(size) } as CSSProperties}
-      className={`memo-card block-scale flex h-full flex-col overflow-hidden rounded-xl border ${bg === 'white' ? 'bg-card' : 'memo-paper'} ${ringOf(isSelected, lit)}`}
+      data-memo={paint.memo}
+      data-dark={paint.dark ? '' : undefined}
+      style={{ ...paint.style, '--fs': blockScale(size) } as CSSProperties}
+      className={`memo-card block-scale flex h-full flex-col overflow-hidden rounded-xl border text-ink ${paint.paper ? 'memo-paper' : 'bg-card'} ${ringOf(isSelected, lit)}`}
     >
       <header className="flex h-11 shrink-0 items-center gap-1.5 border-b border-rule pr-1 pl-2">
         <Grip block={block} />
         <Icon name={BLOCK_ICON[block.type]} size={18} className="shrink-0 text-accent" />
-        <h2 data-title-color={titleColor(block.config.title_color)} className="min-w-0 truncate text-[calc(17px*var(--fs,1))] font-bold">
+        <h2 data-title-color={titlePaint(block.config.title_color).attr} style={titlePaint(block.config.title_color).style} className="min-w-0 truncate text-[calc(17px*var(--fs,1))] font-bold">
           {block.title}
         </h2>
         <BlockCount block={block} />
@@ -578,8 +604,10 @@ function PhoneBoard({ blocks }: { blocks: BlockDto[] }) {
             key={b.id}
             data-tile={b.id}
             data-block={b.id}
-            data-memo={b.type === 'memo' ? memoColor(b.config.color) : blockBg(b) === 'white' ? undefined : blockBg(b)}
-            className={`flex min-w-0 flex-col overflow-hidden rounded-xl border transition ${b.type === 'memo' || blockBg(b) !== 'white' ? 'memo-paper' : 'bg-card'} ${dragId === b.id ? 'scale-[1.02] border-accent! shadow-lg ring-2 ring-accent/25' : ''} ${lit.includes(b.id) ? 'flash-ring border-accent!' : ''}`}
+            data-memo={paintOf(b).memo}
+            data-dark={paintOf(b).dark ? '' : undefined}
+            style={paintOf(b).style as CSSProperties | undefined}
+            className={`flex min-w-0 flex-col overflow-hidden rounded-xl border text-ink transition ${paintOf(b).paper ? 'memo-paper' : 'bg-card'} ${dragId === b.id ? 'scale-[1.02] border-accent! shadow-lg ring-2 ring-accent/25' : ''} ${lit.includes(b.id) ? 'flash-ring border-accent!' : ''}`}
           >
             <div
               role="button"
@@ -593,7 +621,7 @@ function PhoneBoard({ blocks }: { blocks: BlockDto[] }) {
               className={`flex h-12 shrink-0 items-center gap-2 px-3 select-none ${b.type === 'memo' ? 'memo-bar' : 'border-b border-rule'}`}
             >
               <Icon name={BLOCK_ICON[b.type]} size={20} className={b.pinned ? 'text-accent' : 'text-sub'} />
-              <span data-title-color={titleColor(b.config.title_color)} className="min-w-0 flex-1 truncate text-base font-bold">
+              <span data-title-color={titlePaint(b.config.title_color).attr} style={titlePaint(b.config.title_color).style} className="min-w-0 flex-1 truncate text-base font-bold">
                 {b.title}
               </span>
               <BlockCount block={b} />

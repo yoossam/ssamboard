@@ -44,5 +44,6 @@ export const notiShowOf = (config: Record<string, unknown> | undefined): NotiSho
  * 스티커로 접기(2026-11-28 선생님 "블록을 최소화해 붙여만 놓고 누르면 모달로"): 모든 블록에.
  * 접으면 작은 크기로(제목·건수만), 펼치면 접기 전 크기(config.expanded_layout)로 돌아간다. 누르면 크게 보기 창.
  */
-export const STICKER_SIZE = { w: 4, h: 2 } as const;
+/** 처음 접을 때 크기 — 한 줄 높이(위아래 여백 없이). 접은 뒤에도 모서리로 크기를 바꾼다. */
+export const STICKER_SIZE = { w: 4, h: 1 } as const;
 export const isCollapsed = (config: Record<string, unknown> | undefined): boolean => config?.collapsed === true;

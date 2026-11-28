@@ -113,7 +113,7 @@ export function AbilitiesPanel() {
   };
   return (
     <Sheet
-      title={`${BOARD_KIND_LABEL[kind]} 보드에서 할 수 있는 일`}
+      title={`도움말 — ${BOARD_KIND_LABEL[kind]} 보드에서 할 수 있는 일`}
       icon="info"
       onClose={close}
       width={880}

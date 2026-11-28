@@ -16,6 +16,7 @@ import {
   NOTI_SHOWS,
   TASK_FILTERS,
   checkLinkItems,
+  isHexColor,
 } from '@jarvis/shared';
 import type { Response } from 'express';
 import { Auth, type AuthCtx } from '../auth/auth.types';
@@ -42,9 +43,10 @@ function sendHtml(res: Response, html: string, csp: string, extra: Record<string
 function checkConfig(config: Record<string, any> | undefined): Record<string, any> | undefined {
   if (!config) return config;
   // 꾸미기 값은 정해 둔 이름만(화면이 그 이름으로 색을 고른다 — 아무 글자나 받으면 CSS 로 새지 않게).
-  if (config.bg !== undefined && !(MEMO_COLORS as readonly unknown[]).includes(config.bg)) bad('바탕색이 잘못됐습니다.');
-  if (config.title_color !== undefined && !(TITLE_COLORS as readonly unknown[]).includes(config.title_color)) bad('제목 색이 잘못됐습니다.');
-  if (config.color !== undefined && !(MEMO_COLORS as readonly unknown[]).includes(config.color)) bad('종이 색이 잘못됐습니다.');
+  // 정해 둔 이름 또는 고른 색(#rrggbb — 2026-11-28 "자유자재로")만
+  if (config.bg !== undefined && !(MEMO_COLORS as readonly unknown[]).includes(config.bg) && !isHexColor(config.bg)) bad('바탕색이 잘못됐습니다.');
+  if (config.title_color !== undefined && !(TITLE_COLORS as readonly unknown[]).includes(config.title_color) && !isHexColor(config.title_color)) bad('제목 색이 잘못됐습니다.');
+  if (config.color !== undefined && !(MEMO_COLORS as readonly unknown[]).includes(config.color) && !isHexColor(config.color)) bad('종이 색이 잘못됐습니다.');
   if (config.text !== undefined && (typeof config.text !== 'string' || config.text.length > 20_000)) bad('글은 20,000자까지입니다.');
   // 할 일·일정·알림 블록의 보여 줄 내용(@jarvis/shared blockview.ts)
   if (config.task_filter !== undefined && !(TASK_FILTERS as readonly unknown[]).includes(config.task_filter)) bad('할 일 보기 방식이 잘못됐습니다.');

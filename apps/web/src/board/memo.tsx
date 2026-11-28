@@ -1,6 +1,6 @@
-import { useEffect, useState, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useState, type MouseEvent, type ReactNode, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { blockBg, MEMO_COLORS, MEMO_COLOR_LABEL, TITLE_COLORS, TITLE_COLOR_LABEL, titleColor, type BlockDto, type BoardDto, type MemoColor, type TitleColor } from '@jarvis/shared';
+import { blockBg, MEMO_COLORS, MEMO_COLOR_LABEL, TITLE_COLORS, TITLE_COLOR_LABEL, titleColor, type BlockDto, type BoardDto, type MemoColor, type TitleColor, isHexColor } from '@jarvis/shared';
 import { Icon } from '../components/Icon';
 import { api, errorMessage } from '../lib/api';
 import { keys, queryClient, refresh, boardKey } from '../lib/data';
@@ -12,7 +12,7 @@ import { useApp } from '../lib/store';
  * 꾸미기 값(바탕·제목 색)은 누르자마자 바꾸고 저장한다. 서버는 config 를 보낸 키만 바꾸므로 메모 글과 서로 덮어쓰지 않는다.
  * 메모의 바탕은 옛 이름 그대로 config.color, 다른 블록은 config.bg.
  */
-export async function setBlockStyle(block: BlockDto, change: { bg?: MemoColor; title_color?: TitleColor }): Promise<void> {
+export async function setBlockStyle(block: BlockDto, change: { bg?: MemoColor | string; title_color?: TitleColor | string }): Promise<void> {
   const patch: Record<string, string> = {};
   if (change.bg) patch[block.type === 'memo' ? 'color' : 'bg'] = change.bg;
   if (change.title_color) patch.title_color = change.title_color;
@@ -23,6 +23,32 @@ export async function setBlockStyle(block: BlockDto, change: { bg?: MemoColor; t
     useApp.getState().toast(errorMessage(e), 'error');
     void refresh('board');
   }
+}
+
+/**
+ * 직접 고르기(2026-11-28 "블록 색깔도 자유자재로"): 어떤 색이든. 끌어 고르는 동안은 화면만 바꾸고, 멈추면 저장한다.
+ */
+export function CustomColor({ value, onPick, label }: { value: unknown; onPick: (hex: string) => void; label: string }) {
+  const [v, setV] = useState(isHexColor(value) ? value : '#6d5bd0');
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  return (
+    <label className="mt-2 flex cursor-pointer items-center gap-2 text-xs text-sub">
+      <input
+        type="color"
+        aria-label={label}
+        value={v}
+        onChange={(e) => {
+          const c = e.target.value;
+          setV(c);
+          clearTimeout(timer.current);
+          timer.current = setTimeout(() => onPick(c), 250);
+        }}
+        className={`h-8 w-11 cursor-pointer rounded-lg border bg-card p-0.5 ${isHexColor(value) ? 'ring-2 ring-accent ring-offset-1' : ''}`}
+      />
+      직접 고르기{isHexColor(value) ? <span className="font-mono">{value}</span> : null}
+    </label>
+  );
 }
 
 /** 제목 글자색 동그라미 한 줄. */
@@ -138,8 +164,10 @@ export function BlockStyleButton({
             {actions && <div className="-mx-1 -mt-1 mb-2 flex flex-col border-b border-rule pb-2">{actions(() => setAt(null))}</div>}
             <p className="mb-2 text-xs font-medium text-sub">바탕</p>
             <MemoColorDots value={blockBg(block)} onPick={(bg) => void setBlockStyle(block, { bg })} />
+            <CustomColor label="바탕색 직접 고르기" value={block.type === 'memo' ? block.config.color : block.config.bg} onPick={(bg) => void setBlockStyle(block, { bg })} />
             <p className="mt-3 mb-2 text-xs font-medium text-sub">제목 글자색</p>
             <TitleColorDots value={titleColor(block.config.title_color)} onPick={(title_color) => void setBlockStyle(block, { title_color })} />
+            <CustomColor label="제목 색 직접 고르기" value={block.config.title_color} onPick={(title_color) => void setBlockStyle(block, { title_color })} />
           </div>,
           document.body,
         )}

@@ -82,7 +82,7 @@ function MenuPanel() {
         <Tile icon="trash" label="휴지통" onClick={() => replace({ kind: 'trash' })} />
         <Tile icon="settings" label="설정" onClick={() => replace({ kind: 'settings' })} />
         {/* 사용 안내(apps/web/public/guide.html) — 기능을 바꾸면 안내도 같이(scripts/check-guide.mjs 가 npm test 에서 견준다) */}
-        <Tile icon="info" label="할 수 있는 일" onClick={() => replace({ kind: 'abilities' })} />
+        <Tile icon="info" label="도움말" onClick={() => replace({ kind: 'abilities' })} />
         <Tile icon="info" label="사용 안내" onClick={() => window.open('./guide.html', '_blank', 'noopener')} />
       </div>
     </Sheet>
