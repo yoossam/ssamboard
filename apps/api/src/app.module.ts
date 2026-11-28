@@ -19,6 +19,8 @@ import { NotificationsService } from './notifications/notifications.service';
 import { DataController } from './data/data.controller';
 import { MenusController } from './menus/menus.controller';
 import { MenusService } from './menus/menus.service';
+import { PublicShareController, SharesController } from './shares/shares.controller';
+import { SharesService } from './shares/shares.service';
 import { TablesController } from './tables/tables.controller';
 import { TablesService } from './tables/tables.service';
 import { UploadsService } from './uploads/uploads.service';
@@ -42,6 +44,8 @@ import { WorkerService } from './worker/worker.service';
     AiController,
     TrashController,
     MenusController,
+    SharesController,
+    PublicShareController,
   ],
   providers: [
     Db,
@@ -58,6 +62,7 @@ import { WorkerService } from './worker/worker.service';
     CommandsService,
     AiService,
     MenusService,
+    SharesService,
     WorkerService,
     { provide: APP_GUARD, useClass: SessionGuard },
   ],

@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import { Logger } from '@nestjs/common';
+import { Logger, RequestMethod } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import cookieParser from 'cookie-parser';
@@ -54,7 +54,8 @@ async function bootstrap(): Promise<void> {
   app.use(cookieParser());
   // AI 창의 이미지 첨부(최대 4장, 화면에서 줄여 보냄) 때문에 2MB → 16MB(2026-11-27). 다른 요청은 각자 글자 수를 따로 막는다.
   app.useBodyParser('json', { limit: '16mb' });
-  app.setGlobalPrefix('api', { exclude: ['health'] });
+  // 공유 페이지(/s/<열쇠>)는 /api 밖에서 로그인 없이 연다(shares.controller.ts)
+  app.setGlobalPrefix('api', { exclude: ['health', { path: 's/:token', method: RequestMethod.GET }] });
   app.enableShutdownHooks();
 
   const applied = await runMigrations(app.get(Db).pool);
@@ -71,7 +72,7 @@ async function bootstrap(): Promise<void> {
       },
     });
     app.use((req: Request, res: Response, next: NextFunction) => {
-      if (req.method !== 'GET' || req.path.startsWith('/api/') || req.path === '/health' || /\.[a-z0-9]+$/i.test(req.path)) return next();
+      if (req.method !== 'GET' || req.path.startsWith('/api/') || req.path.startsWith('/s/') || req.path === '/health' || /\.[a-z0-9]+$/i.test(req.path)) return next();
       res.setHeader('Cache-Control', 'no-cache');
       res.sendFile(index);
     });

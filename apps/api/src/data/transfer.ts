@@ -14,7 +14,7 @@ export const SYNC_TABLES = ['users', 'boards', 'ai_commands', 'data_tables', 'da
 /** 나중에 더한 표 — 그 전에 만든 파일·드라이브 자료에는 없으므로 빈 표로 받는다(새 표를 SYNC_TABLES 에 더하면 여기에도). */
 export const ADDED_LATER_TABLES = ['menu_items'] as const;
 /** 옮기지 않는 표(시험이 표 목록 전체와 견준다 — 새 표가 생기면 둘 중 하나에 넣는다). */
-export const LOCAL_ONLY_TABLES = ['schema_migrations', 'app_meta', 'allowed_emails', 'sessions', 'api_keys', 'connectors', 'uploads', 'audit_logs'] as const;
+export const LOCAL_ONLY_TABLES = ['schema_migrations', 'app_meta', 'allowed_emails', 'sessions', 'api_keys', 'connectors', 'uploads', 'audit_logs', 'shares'] as const;
 /** users 줄에서 옮기는 칸(이메일·PIN·암호·잠금은 옮기지 않는다) */
 const USER_FIELDS = ['name', 'timezone', 'monthly_budget', 'llm_provider', 'llm_model', 'onboarded_at'] as const;
 

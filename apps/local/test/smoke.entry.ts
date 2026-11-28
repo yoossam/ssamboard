@@ -1,5 +1,9 @@
 import { openLocalDb } from '../src/db';
 import { createLocalApp } from '../src/app';
+import { config } from '../src/shim/config';
+import { SharesService } from '../../api/src/shares/shares.service';
+import { ItemsService } from '../../api/src/items/items.service';
+import { TablesService } from '../../api/src/tables/tables.service';
 
 export async function run() {
   const db = await openLocalDb();
@@ -100,6 +104,90 @@ export async function run() {
   delete old.tables.menu_items;
   out.importOld = (await call('POST', '/data/import', { pin: '000000', data: old })).status;
   out.menusAfterOld = (await call('GET', '/menus')).body.length;
+  // 공유 링크(2026-11-28): 서버 트랙 방식(/s/<열쇠>) — 같은 서비스 코드를 직접 부른다
+  const meRow = await db.one('select * from users where email = $1', ['teacher@example.com']);
+  await call('POST', '/tasks', { title: '<script>alert(1)</script> 동의서 900101-1234567', due_at: null });
+  const blocksNow = (await call('GET', '/boards/current')).body.blocks;
+  const tasksBlock = blocksNow.find((b: any) => b.type === 'tasks');
+  const notiBlock = blocksNow.find((b: any) => b.type === 'notifications');
+  const tbl = (await call('POST', '/tables', { name: '제출 현황', columns: [{ name: '이름', type: 'text' }, { name: '전화', type: 'text' }, { name: '제출', type: 'boolean' }], rows: [['가나', '010-1111-2222', 'true']] })).body;
+  const tableId = tbl.table?.id ?? tbl.id;
+  const tblBlock = (await call('POST', '/blocks', { type: 'table', title: '제출 현황', source_table_id: tableId })).body;
+  const phoneCol = (await call('GET', '/tables')).body.find((t: any) => t.id === tableId).schema.columns.find((c: any) => c.name === '전화').id;
+  const drive: { calls: string[] } = { calls: [] };
+  const fakeConnectors = { driveToken: async () => 'drive-tok' } as any;
+  const svc = new SharesService(db as any, new ItemsService(db as any), new TablesService(db as any), fakeConnectors);
+  config.shareMode = 'server';
+  const s1 = await svc.create(meRow, { block_id: tasksBlock.id, days: 30 });
+  out.shareUrl = s1.url.replace(/[0-9a-f]{48}$/, '<열쇠>');
+  const token = s1.url.slice(-48);
+  const page1 = (await svc.publicPage(token)) ?? '';
+  out.sharePage = { hasTask: page1.includes('동의서'), scriptEscaped: !page1.includes('<script>') && page1.includes('&lt;script&gt;'), rrnMasked: page1.includes('900101-*******') && !page1.includes('1234567'), noindex: page1.includes('noindex') };
+  const s2 = await svc.create(meRow, { block_id: tblBlock.id ?? tblBlock.block?.id, days: 7, options: { hide_columns: [phoneCol] } });
+  const page2 = (await svc.publicPage(s2.url.slice(-48))) ?? '';
+  out.shareTable = { name: page2.includes('가나'), phoneHidden: !page2.includes('010-1111-2222') && !page2.includes('>전화<'), yes: page2.includes('예') };
+  // 공유한 뒤 더한 칸은 보이지 않는다, 숫자 칸의 카드번호 모양도 가린다(코덱스 검토)
+  await call('PATCH', `/tables/${tableId}/schema`, { ops: [{ op: 'add', name: '주소', type: 'text' }, { op: 'add', name: '카드', type: 'number' }] }).catch(() => undefined);
+  const cols2 = (await call('GET', '/tables')).body.find((t: any) => t.id === tableId).schema.columns;
+  const rowId = (await call('GET', `/tables/${tableId}/rows?page=1&size=5`)).body.rows[0].id;
+  const addrCol = cols2.find((c: any) => c.name === '주소');
+  const cardCol = cols2.find((c: any) => c.name === '카드');
+  if (addrCol && cardCol) await call('PATCH', `/tables/${tableId}/rows/${rowId}`, { values: { [addrCol.id]: '비밀 주소', [cardCol.id]: 4111111111111111 } });
+  const page2b = (await svc.publicPage(s2.url.slice(-48))) ?? '';
+  out.shareNewCol = { added: Boolean(addrCol && cardCol), addrHidden: !page2b.includes('비밀 주소') && !page2b.includes('>주소<') };
+  const s3 = await svc.create(meRow, { block_id: tblBlock.id ?? tblBlock.block?.id, days: 7 });
+  const page3 = (await svc.publicPage(s3.url.slice(-48))) ?? '';
+  out.shareCardMasked = page3.includes('****-****-****-1111') && !page3.includes('4,111,111');
+  out.sharePreview = (await svc.preview(meRow, { block_id: tasksBlock.id })).html.includes('미리 보기');
+  out.shareNoti = await svc.create(meRow, { block_id: notiBlock.id }).then(() => 'ok', (e: any) => e.message);
+  out.shareBadDays = await svc.create(meRow, { block_id: tasksBlock.id, days: 5 }).then(() => 'ok', (e: any) => e.message);
+  out.shareViews = (await svc.list(meRow.id, tasksBlock.id))[0].view_count;
+  await svc.revoke(meRow, s1.id);
+  out.shareAfterRevoke = await svc.publicPage(token);
+  await db.query("update shares set expires_at = now() - interval '1 minute' where id = $1", [s2.id]);
+  out.shareAfterExpire = await svc.publicPage(s2.url.slice(-48));
+  out.shareBadToken = await svc.publicPage('../../etc');
+  // 구글 드라이브 트랙: 비공개 문서 → 기록 → 공개 권한, 끄기는 권한을 지운 뒤 휴지통(코덱스 검토)
+  config.shareMode = 'drive';
+  const realFetch = globalThis.fetch;
+  let failPerm = false;
+  let failRevoke = false;
+  let revokeDuring = false;
+  globalThis.fetch = (async (url: string, init: any = {}) => {
+    const m = init.method ?? 'GET';
+    const path = String(url).replace('https://www.googleapis.com', '').split('?')[0];
+    drive.calls.push(`${m} ${path}`);
+    if (path.includes('/permissions') && m === 'POST' && revokeDuring) await db.query("update shares set revoked_at = now() where external_url is null and revoked_at is null");
+    if (path.includes('/permissions') && m === 'POST') return failPerm ? new Response('{"error":{"message":"x"}}', { status: 500 }) : new Response('{"id":"anyoneWithLink"}', { status: 200 });
+    if (path.includes('/permissions') && m === 'DELETE') return new Response(null, { status: failRevoke ? 500 : 204 });
+    if (m === 'POST') return new Response(JSON.stringify({ id: 'doc1', webViewLink: 'https://docs.google.com/document/d/doc1/view' }), { status: 200 });
+    return new Response('{}', { status: 200 });
+  }) as any;
+  try {
+    const d1 = await svc.create(meRow, { block_id: tasksBlock.id, days: 30 });
+    out.driveShare = { url: d1.url, mode: d1.mode, expires: d1.expires_at };
+    await svc.refresh(meRow, d1.id);
+    failRevoke = true;
+    out.driveRevokeFail = await svc.revoke(meRow, d1.id).then(() => 'ok', (e: any) => e.message);
+    out.driveStillOn = (await svc.list(meRow.id, tasksBlock.id)).find((x) => x.id === d1.id)?.revoked_at === null;
+    failRevoke = false;
+    await svc.revoke(meRow, d1.id);
+    out.driveOff = (await svc.list(meRow.id, tasksBlock.id)).find((x) => x.id === d1.id)?.revoked_at !== null;
+    const before = (await svc.list(meRow.id)).length;
+    failPerm = true;
+    drive.calls.push('--- 권한 실패');
+    out.drivePermFail = await svc.create(meRow, { block_id: tasksBlock.id }).then(() => 'ok', (e: any) => e.message);
+    out.drivePermFailNoRow = (await svc.list(meRow.id)).length === before;
+    failPerm = false;
+    revokeDuring = true;
+    drive.calls.push('--- 만드는 중 끄기');
+    out.driveRevokedDuring = await svc.create(meRow, { block_id: tasksBlock.id }).then(() => 'ok', (e: any) => e.message);
+    revokeDuring = false;
+  } finally {
+    globalThis.fetch = realFetch;
+    config.shareMode = 'drive';
+  }
+  out.driveCalls = drive.calls;
   out.changes = changes;
   await db.close();
   return out;

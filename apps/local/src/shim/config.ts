@@ -19,6 +19,8 @@ export const config = {
   openaiBaseUrl: 'https://api.openai.com',
   /** 브라우저가 Claude 를 바로 부른다(anthropic-dangerous-direct-browser-access). */
   anthropicBrowserAccess: true,
+  /** 공유 링크는 내 구글 드라이브의 구글 문서로(서버가 없어 /s/ 페이지를 낼 수 없다) */
+  shareMode: 'drive' as 'server' | 'drive',
   workerEnabled: false,
 };
 export const googleConfigured = (): boolean => false;

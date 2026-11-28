@@ -71,6 +71,13 @@ export class ConnectorsService {
     return row!.id;
   }
 
+  /** 사용자의 구글 연결(drive.file)로 받은 접근 토큰 — 공유 링크(구글 문서)처럼 표 연결 밖에서 드라이브를 쓸 때. */
+  async driveToken(userId: string): Promise<string> {
+    const row = await this.db.one<{ id: string }>(`select id from connectors where user_id = $1 and type = 'google_sheets' order by created_at limit 1`, [userId]);
+    if (!row) bad('구글 문서로 공유하려면 설정 → 연결에서 구글을 먼저 연결하세요.');
+    return this.googleToken(userId, row!.id);
+  }
+
   private async googleToken(userId: string, connectorId: string): Promise<string> {
     const row = await this.db.one<{ token_encrypted: string | null }>(`select token_encrypted from connectors where id = $1 and user_id = $2 and type = 'google_sheets'`, [connectorId, userId]);
     if (!row) notFound('커넥터');

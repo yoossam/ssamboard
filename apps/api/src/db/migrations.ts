@@ -333,4 +333,31 @@ create index menu_items_user on menu_items(user_id, position);
 alter table users add column onboarded_at timestamptz;
 `,
   },
+  {
+    // 공유 링크(2026-11-28): 블록 하나를 로그인 없이 읽기 전용으로. token 은 링크 속 긴 무작위 값(보는 권한 그 자체).
+    // block_id 는 가리키기 검사를 두지 않는다 — 자료 가져오기로 블록을 지웠다 다시 넣어도 링크가 남게(볼 때 확인한다).
+    // external_* 는 구글 드라이브 트랙(구글 문서)의 주소·파일 id·공개 권한 id(끌 때 이 권한을 지운다 — 휴지통만으로는 계속 보인다).
+    // options.show_columns 는 공유할 때 보이기로 한 칸 — 뒤에 더한 칸은 보이지 않는다(코덱스 검토).
+    name: '007_shares',
+    sql: /* sql */ `
+create table shares (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  block_id uuid not null,
+  token text not null unique,
+  title text not null default '',
+  options jsonb not null default '{}',
+  external_url text,
+  external_id text,
+  external_perm text,
+  expires_at timestamptz,
+  revoked_at timestamptz,
+  view_count int not null default 0,
+  last_viewed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index shares_user on shares(user_id, block_id);
+`,
+  },
 ];

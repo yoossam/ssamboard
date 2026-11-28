@@ -17,6 +17,7 @@ export type Panel =
   | { kind: 'trash' }
   | { kind: 'block'; blockId: string }
   | { kind: 'block-edit'; blockId: string }
+  | { kind: 'share'; blockId: string }
   | { kind: 'task'; taskId?: string }
   | { kind: 'event'; eventId?: string };
 

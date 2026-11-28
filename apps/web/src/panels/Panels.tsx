@@ -1,6 +1,7 @@
 import { useState, type ReactNode, type CSSProperties } from 'react';
-import { BLOCK_LABEL, BLOCK_TYPES, memoColor, TRASH_DAYS, type BlockDto, type BlockType, type EventDto, type NotificationDto, type TaskDto, type TrashItem } from '@jarvis/shared';
+import { BLOCK_LABEL, BLOCK_TYPES, memoColor, SHAREABLE_BLOCKS, TRASH_DAYS, type BlockDto, type BlockType, type EventDto, type NotificationDto, type TaskDto, type TrashItem } from '@jarvis/shared';
 import { useAi } from '../ai/AiWindow';
+import { SharePanel } from './Share';
 import { BlockBody, PriorityTag, readAll } from '../board/blocks';
 import { togglePin } from '../board/Board';
 import { MemoColorDots } from '../board/memo';
@@ -164,6 +165,11 @@ function BlockPanel({ blockId }: { blockId: string }) {
           <Button icon="edit" onClick={() => replace({ kind: 'block-edit', blockId })}>
             블록 편집
           </Button>
+          {SHAREABLE_BLOCKS.includes(block.type) && (
+            <Button icon="link" onClick={() => replace({ kind: 'share', blockId })}>
+              공유 링크
+            </Button>
+          )}
         </ButtonRow>
       }
     >
@@ -463,6 +469,8 @@ function PanelView({ panel }: { panel: Panel }) {
       return <BlockPanel blockId={panel.blockId} />;
     case 'block-edit':
       return <BlockEditPanel blockId={panel.blockId} />;
+    case 'share':
+      return <SharePanel blockId={panel.blockId} />;
     case 'task':
       return <TaskPanel taskId={panel.taskId} />;
     case 'event':

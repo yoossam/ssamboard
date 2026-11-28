@@ -67,6 +67,43 @@ test('서버 코드가 브라우저 틀(PGlite)에서 그대로 돈다', async (
   assert.equal(r.exportMenus, 4);
   assert.equal(r.importOld, 201);
   assert.equal(r.menusAfterOld, 0);
+  // 공유 링크
+  assert.match(r.shareUrl, /\/s\/<열쇠>$/);
+  assert.deepEqual(r.sharePage, { hasTask: true, scriptEscaped: true, rrnMasked: true, noindex: true });
+  assert.deepEqual(r.shareTable, { name: true, phoneHidden: true, yes: true });
+  assert.match(r.shareNoti, /공유할 수 없습니다/);
+  assert.match(r.shareBadDays, /기간은/);
+  assert.equal(r.shareViews, 1);
+  assert.equal(r.shareAfterRevoke, null);
+  assert.equal(r.shareAfterExpire, null);
+  assert.equal(r.shareBadToken, null);
+  assert.deepEqual(r.shareNewCol, { added: true, addrHidden: true });
+  assert.equal(r.shareCardMasked, true);
+  assert.equal(r.sharePreview, true);
+  // 드라이브 트랙: 기간은 늘 없음, 끄기 실패면 켜진 채로, 권한 실패면 문서·기록을 치움
+  assert.deepEqual(r.driveShare, { url: 'https://docs.google.com/document/d/doc1/view', mode: 'drive', expires: null });
+  assert.match(r.driveRevokeFail, /공개를 끄지 못했습니다/);
+  assert.equal(r.driveStillOn, true);
+  assert.equal(r.driveOff, true);
+  assert.match(r.drivePermFail, /링크를 열하지 못했습니다|링크를 열/);
+  assert.equal(r.drivePermFailNoRow, true);
+  assert.deepEqual(r.driveCalls, [
+    'POST /upload/drive/v3/files',
+    'POST /drive/v3/files/doc1/permissions',
+    'PATCH /upload/drive/v3/files/doc1',
+    'DELETE /drive/v3/files/doc1/permissions/anyoneWithLink',
+    'DELETE /drive/v3/files/doc1/permissions/anyoneWithLink',
+    'PATCH /drive/v3/files/doc1',
+    '--- 권한 실패',
+    'POST /upload/drive/v3/files',
+    'POST /drive/v3/files/doc1/permissions',
+    'DELETE /drive/v3/files/doc1',
+    '--- 만드는 중 끄기',
+    'POST /upload/drive/v3/files',
+    'POST /drive/v3/files/doc1/permissions',
+    'DELETE /drive/v3/files/doc1',
+  ]);
+  assert.match(r.driveRevokedDuring, /만드는 사이 링크를 껐습니다/);
 });
 
 test('구글 드라이브 맞춤: 올리기·다른 기기 받기·충돌·열쇠 안 올림·백업', async () => {

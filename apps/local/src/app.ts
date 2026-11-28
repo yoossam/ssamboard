@@ -14,6 +14,8 @@ import { UploadsService } from '../../api/src/uploads/uploads.service';
 import { DataController } from '../../api/src/data/data.controller';
 import { MenusController } from '../../api/src/menus/menus.controller';
 import { MenusService } from '../../api/src/menus/menus.service';
+import { SharesController } from '../../api/src/shares/shares.controller';
+import { SharesService } from '../../api/src/shares/shares.service';
 import { NotificationsService } from '../../api/src/notifications/notifications.service';
 import { TablesController } from '../../api/src/tables/tables.controller';
 import { TablesService } from '../../api/src/tables/tables.service';
@@ -75,6 +77,8 @@ export async function createLocalApp(db: LocalDb, who: LocalIdentity, opts: Loca
   // 파일로 표 만들기: 올린 파일은 이 탭의 메모리(shim/node-fs.ts)에 표를 만들 때까지만 둔다.
   const uploads = new UploadsService(anyDb, llm, tables);
   const menus = new MenusService(anyDb, llm, tables);
+  // 공유 링크: 서버가 없으니 구글 문서로(config.shareMode = 'drive')
+  const shares = new SharesService(anyDb, items, tables, connectors);
 
   /** 매 요청마다 세션이 가리키는 사용자를 새로 읽는다(설정 변경·자료 받기로 사용자가 바뀌어도 맞게). */
   const authCtx = async (): Promise<AuthCtx> => {
@@ -154,6 +158,7 @@ export async function createLocalApp(db: LocalDb, who: LocalIdentity, opts: Loca
       new TrashController(anyDb),
       new ConnectorsController(connectors, google as any, auth as any, audit),
       new MenusController(menus),
+      new SharesController(shares, audit),
     ],
     authCtx,
     opts.onChange,

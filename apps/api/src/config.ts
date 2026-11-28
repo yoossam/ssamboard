@@ -40,6 +40,8 @@ export const config = {
   openaiBaseUrl: (env.OPENAI_BASE_URL ?? 'https://api.openai.com').replace(/\/$/, ''),
   /** 브라우저가 Claude 를 바로 부르는지(구글 드라이브 트랙만 참 — apps/local/src/shim/config.ts). 서버는 늘 거짓. */
   anthropicBrowserAccess: false,
+  /** 공유 링크를 어떻게 내보내나 — 서버는 /s/<열쇠> 페이지, 구글 드라이브 트랙은 구글 문서(apps/local/src/shim/config.ts) */
+  shareMode: 'server' as 'server' | 'drive',
   /** 워커(알림·시트 동기화·휴지통 정리)를 이 프로세스에서 돌릴지 여부. */
   workerEnabled: (env.WORKER_ENABLED ?? 'true') === 'true',
 };

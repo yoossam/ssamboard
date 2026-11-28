@@ -7,3 +7,4 @@ export * from './layout';
 export * from './view';
 export * from './form';
 export * from './menu';
+export * from './share';
