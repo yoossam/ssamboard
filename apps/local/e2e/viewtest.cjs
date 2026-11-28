@@ -3,6 +3,8 @@ const pw = require(process.argv[2]); const S = process.argv[3];
   const b = await pw.chromium.launch();
   const ctx = await b.newContext({ viewport: { width: 1280, height: 820 } });
   const p = await ctx.newPage(); const logs = []; const reqs = [];
+  // 처음 접속 안내가 뜨면 건너뛴다(그 흐름은 menutest.cjs 가 본다)
+  await p.addLocatorHandler(p.getByText('처음 시작하기 ·'), async () => { await p.getByRole('button', { name: '건너뛰기' }).click(); });
   p.on('pageerror', (e) => logs.push('ERR ' + e.message)); p.on('console', (m) => m.type() !== 'log' && logs.push(m.type() + ' ' + m.text().slice(0, 160)));
   const reached = [];
   await ctx.route('https://www.googleapis.com/**', (r) => { reached.push(r.request().url()); r.fulfill({ status: 200, body: 'ok', headers: { 'access-control-allow-origin': '*' } }); });

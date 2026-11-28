@@ -17,6 +17,7 @@ export interface UserRow {
   monthly_budget: string;
   llm_provider: string;
   llm_model: string;
+  onboarded_at: string | null;
 }
 
 export interface SessionRow {

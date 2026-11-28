@@ -6,3 +6,4 @@ export * from './mask';
 export * from './layout';
 export * from './view';
 export * from './form';
+export * from './menu';

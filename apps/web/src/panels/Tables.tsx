@@ -148,11 +148,11 @@ function RowForm({ table, row, onDone }: { table: TableDto; row: RowDto | null; 
   );
 }
 
-function RowsTab({ table }: { table: TableDto }) {
+function RowsTab({ table, startNew }: { table: TableDto; startNew?: boolean }) {
   const [ref, size] = useSize<HTMLDivElement>();
   const [page, setPage] = useState(1);
   const [colStart, setColStart] = useState(0);
-  const [editing, setEditing] = useState<RowDto | 'new' | null>(null);
+  const [editing, setEditing] = useState<RowDto | 'new' | null>(startNew ? 'new' : null);
   const per = Math.max(1, Math.floor((size.height - HEAD) / CELL_ROW));
   const { data } = useRows(table.id, page, size.height > 0 ? per : 0);
   const total = data?.total ?? table.row_count;
@@ -448,7 +448,8 @@ function TableSettingsTab({ table }: { table: TableDto }) {
   );
 }
 
-export function TablePanel({ tableId }: { tableId: string }) {
+/** addRow: 메뉴의 '표에 한 줄 넣기'로 열면 바로 새 줄 칸 */
+export function TablePanel({ tableId, addRow }: { tableId: string; addRow?: boolean }) {
   const close = useApp((s) => s.close);
   const { table, isLoading } = useTable(tableId);
   const [tab, setTab] = useState<DetailTab>('rows');
@@ -473,7 +474,7 @@ export function TablePanel({ tableId }: { tableId: string }) {
           ]}
         />
       </div>
-      {tab === 'rows' && <RowsTab table={table} />}
+      {tab === 'rows' && <RowsTab table={table} startNew={addRow} />}
       {tab === 'columns' && <ColumnsTab table={table} />}
       {tab === 'settings' && <TableSettingsTab table={table} />}
     </Sheet>

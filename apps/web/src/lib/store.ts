@@ -11,7 +11,7 @@ export type Panel =
   | { kind: 'settings'; tab?: SettingsTab }
   | { kind: 'notifications' }
   | { kind: 'tables' }
-  | { kind: 'table'; tableId: string }
+  | { kind: 'table'; tableId: string; addRow?: boolean }
   | { kind: 'upload' }
   | { kind: 'sheet'; connectorId: string }
   | { kind: 'trash' }
@@ -20,7 +20,7 @@ export type Panel =
   | { kind: 'task'; taskId?: string }
   | { kind: 'event'; eventId?: string };
 
-export type SettingsTab = 'general' | 'security' | 'connect' | 'devices' | 'drive' | 'data';
+export type SettingsTab = 'general' | 'menu' | 'security' | 'connect' | 'devices' | 'drive' | 'data';
 export type AiLayout = 'modal' | 'panel';
 
 export interface Toast {

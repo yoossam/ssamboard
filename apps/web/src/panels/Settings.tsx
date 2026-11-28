@@ -5,7 +5,8 @@ import { Button, ButtonRow, Empty, Field, IconButton, inputClass, monoInput, Not
 import { api, errorMessage } from '../lib/api';
 import { LOCAL_TRACK } from '../lib/edition';
 import { DriveTab } from '../local-shell/DriveTab';
-import { refresh, useConnectors, useSessions, useSettings } from '../lib/data';
+import { MenuRecommender, describeAction, runMenu } from '../menu/menu';
+import { refresh, useConnectors, useMenus, useSessions, useSettings, useTables } from '../lib/data';
 import { ago, count, shortWhen, usd } from '../lib/format';
 import { useApp, type SettingsTab } from '../lib/store';
 
@@ -542,6 +543,90 @@ function DataTab() {
   );
 }
 
+/** 내 메뉴(위쪽 바로가기 줄): 순서·이름·지우기, AI 추천으로 더하기, 처음 안내 다시 보기 */
+function MenuTab({ settings }: { settings: SettingsDto }) {
+  const toast = useApp((s) => s.toast);
+  const { data: menus } = useMenus();
+  const { data: tables } = useTables();
+  const [editing, setEditing] = useState<{ id: string; label: string } | null>(null);
+  const [adding, setAdding] = useState(false);
+  const hasKey = settings.api_keys.some((k) => k.provider === settings.llm_provider);
+  const list = menus ?? [];
+  const run = async (fn: () => Promise<unknown>, done?: string) => {
+    try {
+      await fn();
+      await refresh('menus');
+      if (done) toast(done);
+    } catch (e) {
+      fail(e);
+    }
+  };
+  const move = (i: number, d: -1 | 1) => {
+    const ids = list.map((m) => m.id);
+    [ids[i], ids[i + d]] = [ids[i + d], ids[i]];
+    void run(() => api.put('/menus/order', { ids }));
+  };
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-sub">위쪽 줄의 바로가기입니다. 누르면 정해 둔 일을 합니다(AI 에게 시키기 · 표 열기 · 표에 한 줄 넣기 · 링크 · 앱 화면).</p>
+      {list.length === 0 ? (
+        <Empty>아직 메뉴가 없습니다. 아래에서 AI 에게 추천받으세요.</Empty>
+      ) : (
+        <div className="divide-y divide-rule rounded-[10px] border">
+          {list.map((m, i) => (
+            <div key={m.id} className="flex items-center gap-2 px-3 py-2">
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-[10px] bg-tint">
+                <Icon name={m.icon} size={16} />
+              </span>
+              <div className="min-w-0 flex-1">
+                {editing?.id === m.id ? (
+                  <input
+                    className={`${inputClass} h-9`}
+                    autoFocus
+                    maxLength={16}
+                    value={editing.label}
+                    onChange={(e) => setEditing({ id: m.id, label: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void run(() => api.patch(`/menus/${m.id}`, { label: editing.label }), '이름을 바꿨습니다').then(() => setEditing(null));
+                      if (e.key === 'Escape') setEditing(null);
+                    }}
+                  />
+                ) : (
+                  <button type="button" className="block max-w-full truncate text-left text-sm font-medium" title="눌러서 해 보기" onClick={() => runMenu(m.action)}>
+                    {m.label}
+                  </button>
+                )}
+                <p className="truncate text-xs text-sub">{describeAction(m.action as any, tables)}</p>
+              </div>
+              <IconButton icon="prev" label="앞으로" size={32} onClick={() => i > 0 && move(i, -1)} />
+              <IconButton icon="next" label="뒤로" size={32} onClick={() => i < list.length - 1 && move(i, 1)} />
+              <IconButton icon="edit" label="이름 바꾸기" size={32} onClick={() => setEditing(editing?.id === m.id ? null : { id: m.id, label: m.label })} />
+              <IconButton icon="trash" label="지우기" size={32} onClick={() => confirm(`"${m.label}" 메뉴를 지울까요? (메뉴가 쓰던 표는 그대로 둡니다)`) && void run(() => api.del(`/menus/${m.id}`), '메뉴를 지웠습니다')} />
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="rounded-[10px] border p-3">
+        <div className="flex items-center gap-2">
+          <Icon name="sparkle" className="text-accent" />
+          <span className="flex-1 text-sm font-bold">AI 에게 메뉴 추천받기</span>
+          <IconButton icon={adding ? 'close' : 'plus'} label={adding ? '닫기' : '추천받기'} active={adding} onClick={() => setAdding(!adding)} />
+        </div>
+        {adding && (
+          <div className="mt-3">
+            {hasKey ? <MenuRecommender onCreated={() => setAdding(false)} /> : <Notice>설정 → 일반에서 AI 열쇠를 먼저 넣어 주세요. 추천은 내 열쇠로 합니다.</Notice>}
+          </div>
+        )}
+      </div>
+      <ButtonRow>
+        <Button icon="refresh" onClick={() => void run(() => api.put('/settings', { onboarded: false }).then(() => refresh('settings')).then(() => useApp.getState().closeAll()))}>
+          처음 안내 다시 보기
+        </Button>
+      </ButtonRow>
+    </div>
+  );
+}
+
 export function SettingsPanel({ initialTab }: { initialTab?: SettingsTab }) {
   const close = useApp((s) => s.close);
   const [tab, setTab] = useState<SettingsTab>(initialTab ?? 'general');
@@ -565,11 +650,13 @@ export function SettingsPanel({ initialTab }: { initialTab?: SettingsTab }) {
           LOCAL_TRACK
             ? [
                 { id: 'general', label: '일반', icon: 'settings' },
+                { id: 'menu', label: '메뉴', icon: 'grid' },
                 { id: 'drive', label: '드라이브', icon: 'save' },
                 { id: 'connect', label: '연결', icon: 'link' },
               ]
             : [
                 { id: 'general', label: '일반', icon: 'settings' },
+                { id: 'menu', label: '메뉴', icon: 'grid' },
                 { id: 'security', label: '보안', icon: 'lock' },
                 { id: 'connect', label: '연결', icon: 'link' },
                 { id: 'devices', label: '기기', icon: 'device' },
@@ -582,6 +669,8 @@ export function SettingsPanel({ initialTab }: { initialTab?: SettingsTab }) {
           <Empty>{errorMessage(error)}</Empty>
         ) : !settings ? (
           <Empty>불러오는 중입니다</Empty>
+        ) : tab === 'menu' ? (
+          <MenuTab settings={settings} />
         ) : tab === 'general' || (LOCAL_TRACK && tab !== 'drive' && tab !== 'connect') ? (
           <GeneralTab settings={settings} />
         ) : tab === 'drive' ? (

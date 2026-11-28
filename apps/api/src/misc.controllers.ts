@@ -73,6 +73,7 @@ export class SettingsController {
       api_keys: await this.llm.keys(u.id),
       month_cost: await this.llm.monthCost(u),
       usage: await this.llm.usage(u),
+      onboarded: Boolean(u.onboarded_at),
     };
   }
 
@@ -93,6 +94,10 @@ export class SettingsController {
       const n = Number(body.monthly_budget);
       if (!Number.isFinite(n) || n < 0 || n > 10_000) bad('비용 한도는 0~10,000달러 사이여야 합니다.');
       patch.monthly_budget = Math.round(n * 100) / 100;
+    }
+    // 처음 접속 안내: true 면 마침(다시 뜨지 않음), false 면 다시 보기
+    if (body?.onboarded !== undefined) {
+      await this.db.query('update users set onboarded_at = case when $2 then coalesce(onboarded_at, now()) else null end where id = $1', [ctx.user.id, body.onboarded === true]);
     }
     if (body?.llm_model !== undefined) {
       // 모델을 고르면 제공자(Claude·GPT)도 그 모델 것으로 바뀐다.

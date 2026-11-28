@@ -28,6 +28,8 @@ async function device(b, name) {
   await ctx.route('https://accounts.google.com/gsi/client', (r) => r.fulfill({ status: 200, contentType: 'text/javascript', body: GIS }));
   await ctx.route('https://www.googleapis.com/**', google);
   const p = await ctx.newPage(); const errs = [];
+  // 처음 접속 안내가 뜨면 건너뛴다(그 흐름은 menutest.cjs 가 본다)
+  await p.addLocatorHandler(p.getByText('처음 시작하기 ·'), async () => { await p.getByRole('button', { name: '건너뛰기' }).click(); });
   p.on('pageerror', (e) => errs.push(name + ' ' + e.message));
   p.on('console', (msg) => msg.type() === 'error' && errs.push(name + ' console ' + msg.text().slice(0, 160)));
   return { ctx, p, errs };

@@ -313,4 +313,24 @@ create table app_meta (
 alter table boards add column theme jsonb not null default '{}';
 `,
   },
+  {
+    // 내 메뉴(2026-11-28): 위쪽 바로가기 줄. 동작은 정해진 몇 가지(@jarvis/shared menu.ts)만 — 서버가 검사한 뒤 넣는다.
+    // 처음 접속 안내를 마쳤는지는 users.onboarded_at.
+    name: '006_menus',
+    sql: /* sql */ `
+create table menu_items (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  position int not null default 0,
+  label text not null,
+  icon text not null default 'sparkle',
+  description text not null default '',
+  action jsonb not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index menu_items_user on menu_items(user_id, position);
+alter table users add column onboarded_at timestamptz;
+`,
+  },
 ];

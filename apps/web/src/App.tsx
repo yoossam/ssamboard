@@ -9,6 +9,7 @@ import { queryClient } from './lib/data';
 import { setTimezone } from './lib/format';
 import { useApp } from './lib/store';
 import { PanelHost } from './panels/Panels';
+import { Onboarding } from './menu/Onboarding';
 import { LockScreen, LoginScreen, OfflineScreen, PinSetupScreen } from './screens/Gate';
 
 /** 활동 신호를 보내는 가장 짧은 간격(AUTH-5: 30초에 한 번 이내). */
@@ -127,6 +128,7 @@ export function App() {
         <Board />
         {aiOpen && <AiWindow />}
         <PanelHost />
+        <Onboarding />
       </>
     );
   return (

@@ -10,11 +10,13 @@
 import type { Queryable } from '../db/db.service';
 
 /** 옮기는 표 — 가리켜지는 쪽이 먼저(넣는 순서). users 는 설정 몇 칸만 옮긴다. */
-export const SYNC_TABLES = ['users', 'boards', 'ai_commands', 'data_tables', 'data_rows', 'blocks', 'tasks', 'events', 'notifications', 'conversations', 'messages', 'llm_runs'] as const;
+export const SYNC_TABLES = ['users', 'boards', 'ai_commands', 'data_tables', 'data_rows', 'menu_items', 'blocks', 'tasks', 'events', 'notifications', 'conversations', 'messages', 'llm_runs'] as const;
+/** 나중에 더한 표 — 그 전에 만든 파일·드라이브 자료에는 없으므로 빈 표로 받는다(새 표를 SYNC_TABLES 에 더하면 여기에도). */
+export const ADDED_LATER_TABLES = ['menu_items'] as const;
 /** 옮기지 않는 표(시험이 표 목록 전체와 견준다 — 새 표가 생기면 둘 중 하나에 넣는다). */
 export const LOCAL_ONLY_TABLES = ['schema_migrations', 'app_meta', 'allowed_emails', 'sessions', 'api_keys', 'connectors', 'uploads', 'audit_logs'] as const;
 /** users 줄에서 옮기는 칸(이메일·PIN·암호·잠금은 옮기지 않는다) */
-const USER_FIELDS = ['name', 'timezone', 'monthly_budget', 'llm_provider', 'llm_model'] as const;
+const USER_FIELDS = ['name', 'timezone', 'monthly_budget', 'llm_provider', 'llm_model', 'onboarded_at'] as const;
 
 export interface SyncData {
   format: 'ssamboard-data';
@@ -46,6 +48,7 @@ export function checkSyncData(data: unknown, mySchema: string): SyncData {
   const d = data as SyncData;
   if (!d || d.format !== 'ssamboard-data' || d.version !== 1 || typeof d.tables !== 'object' || d.tables === null) throw new Error('쌤보드 자료 파일이 아닙니다.');
   if (typeof d.schema !== 'string' || d.schema > mySchema) throw new Error('더 새 판 쌤보드에서 만든 자료입니다. 앱을 새 판으로 바꾼 뒤 다시 하세요.');
+  for (const name of ADDED_LATER_TABLES) if (d.tables[name] === undefined) d.tables[name] = [];
   for (const name of SYNC_TABLES) if (!Array.isArray(d.tables[name])) throw new Error(`자료 파일에 ${name} 표가 없습니다. 쌤보드에서 내보낸 파일인지 확인하세요.`);
   if (d.tables.users.length !== 1) throw new Error('자료 파일에 사용자가 한 명이어야 합니다.');
   for (const name of SYNC_TABLES) for (const r of d.tables[name]) if (!r || typeof r !== 'object' || Array.isArray(r)) throw new Error(`자료 파일의 ${name} 표가 잘못됐습니다.`);

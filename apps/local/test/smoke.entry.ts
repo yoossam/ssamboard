@@ -66,6 +66,40 @@ export async function run() {
   out.connectors = (await call('GET', '/connectors')).body;
   out.connectNoGoogle = (await call('POST', '/connectors', { type: 'google_sheets', pin: '000000' })).body.message;
   out.webhook = (await call('POST', '/connectors', { type: 'webhook', pin: '000000', name: 'x' })).body.message;
+  // 내 메뉴(2026-11-28): 고른 추천으로 만들기 — 새 표는 같은 이름이면 한 번만, 틀에 안 맞는 것은 거부, 열쇠 없으면 추천 안내
+  const draft = (o: Record<string, unknown>) => ({ label: '메뉴', icon: 'sparkle', description: '', action_type: 'ask_ai', prompt: null, url: null, panel: null, table_id: null, new_table: null, reason: '', ...o });
+  const counsel = { name: '상담 기록', columns: [{ name: '날짜', type: 'date' }, { name: '학생', type: 'text' }, { name: '내용', type: 'text' }, { name: '날짜', type: 'text' }] };
+  const menuRes = await call('POST', '/menus', {
+    menus: [
+      draft({ label: '오늘 할 일 정리', icon: 'tasks', action_type: 'ask_ai', prompt: '오늘 할 일을 급한 순서로 정리해 줘' }),
+      draft({ label: '상담 기록 추가', icon: 'edit', action_type: 'add_row', new_table: counsel }),
+      draft({ label: '상담 기록 보기', icon: 'table', action_type: 'open_table', new_table: counsel }),
+      draft({ label: '나이스', icon: 'link', action_type: 'link', url: 'https://www.neis.go.kr' }),
+      draft({ label: '알림', icon: 'nope', action_type: 'open_panel', panel: 'notifications' }),
+    ],
+  });
+  out.menuCreate = menuRes.status;
+  out.menus = menuRes.body.map((m: any) => [m.label, m.icon, m.action.type]);
+  out.menuTables = (await call('GET', '/tables')).body.filter((t: any) => t.name === '상담 기록').map((t: any) => t.schema.columns.map((c: any) => c.name));
+  out.menuSameTable = menuRes.body[1].action.table_id === menuRes.body[2].action.table_id;
+  out.menuBadLink = (await call('POST', '/menus', { menus: [draft({ label: '나쁜', action_type: 'link', url: 'javascript:alert(1)' })] })).body.message;
+  out.menuBadType = (await call('POST', '/menus', { menus: [draft({ label: '나쁜', action_type: 'run_code' })] })).body.message;
+  out.menuNoKey = (await call('POST', '/menus/recommend', { text: '상담 기록과 출결을 관리하고 싶어' })).body.message;
+  await call('PUT', '/menus/order', { ids: [menuRes.body[3].id, menuRes.body[0].id] });
+  await call('DELETE', `/menus/${menuRes.body[4].id}`);
+  await call('PATCH', `/menus/${menuRes.body[0].id}`, { label: '할 일 정리' });
+  out.menusAfter = (await call('GET', '/menus')).body.map((m: any) => m.label);
+  // 처음 접속 안내 표시
+  out.onboardedBefore = (await call('GET', '/settings')).body.onboarded;
+  await call('PUT', '/settings', { onboarded: true });
+  out.onboardedAfter = (await call('GET', '/settings')).body.onboarded;
+  // 메뉴는 내보내기에 담기고, 메뉴 표가 없던 예전 파일도 받아 준다
+  const withMenus = (await call('GET', '/data/export')).body;
+  out.exportMenus = withMenus.tables.menu_items.length;
+  const old = JSON.parse(JSON.stringify(withMenus));
+  delete old.tables.menu_items;
+  out.importOld = (await call('POST', '/data/import', { pin: '000000', data: old })).status;
+  out.menusAfterOld = (await call('GET', '/menus')).body.length;
   out.changes = changes;
   await db.close();
   return out;

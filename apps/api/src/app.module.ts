@@ -17,6 +17,8 @@ import { LlmService } from './llm/llm.service';
 import { AiController, HealthController, NotificationsController, SettingsController, TrashController, UploadsController } from './misc.controllers';
 import { NotificationsService } from './notifications/notifications.service';
 import { DataController } from './data/data.controller';
+import { MenusController } from './menus/menus.controller';
+import { MenusService } from './menus/menus.service';
 import { TablesController } from './tables/tables.controller';
 import { TablesService } from './tables/tables.service';
 import { UploadsService } from './uploads/uploads.service';
@@ -39,6 +41,7 @@ import { WorkerService } from './worker/worker.service';
     WebhooksController,
     AiController,
     TrashController,
+    MenusController,
   ],
   providers: [
     Db,
@@ -54,6 +57,7 @@ import { WorkerService } from './worker/worker.service';
     LlmService,
     CommandsService,
     AiService,
+    MenusService,
     WorkerService,
     { provide: APP_GUARD, useClass: SessionGuard },
   ],

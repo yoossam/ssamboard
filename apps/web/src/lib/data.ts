@@ -1,5 +1,5 @@
 import { keepPreviousData, QueryClient, useQuery } from '@tanstack/react-query';
-import type { BoardDto, ConnectorDto, EventDto, NotificationDto, QueryResult, RowPage, SessionDto, SettingsDto, TableDto, TaskDto, TrashItem } from '@jarvis/shared';
+import type { BoardDto, ConnectorDto, MenuItemDto, EventDto, NotificationDto, QueryResult, RowPage, SessionDto, SettingsDto, TableDto, TaskDto, TrashItem } from '@jarvis/shared';
 import { api, ApiError } from './api';
 import { dayKey, zoneOffset } from './format';
 
@@ -26,6 +26,7 @@ export const keys = {
   sessions: ['sessions'] as const,
   connectors: ['connectors'] as const,
   trash: ['trash'] as const,
+  menus: ['menus'] as const,
 };
 
 /** 바뀐 것을 다시 읽는다. 이름을 주지 않으면 전부. */
@@ -54,6 +55,7 @@ export const useTables = () => useQuery({ queryKey: keys.tables, queryFn: () => 
 export const useSettings = () => useQuery({ queryKey: keys.settings, queryFn: () => api.get<SettingsDto>('/settings') });
 export const useSessions = () => useQuery({ queryKey: keys.sessions, queryFn: () => api.get<SessionDto[]>('/sessions') });
 export const useConnectors = () => useQuery({ queryKey: keys.connectors, queryFn: () => api.get<ConnectorDto[]>('/connectors') });
+export const useMenus = () => useQuery({ queryKey: keys.menus, queryFn: () => api.get<MenuItemDto[]>('/menus') });
 export const useTrash = () => useQuery({ queryKey: keys.trash, queryFn: () => api.get<TrashItem[]>('/trash') });
 
 /** 표 하나. 표 목록에서 찾는다(목록이 스키마까지 담고 있다). */

@@ -11,4 +11,5 @@ node apps/local/e2e/drivetrack.cjs $PW $OUT   # 로그인→할 일→열쇠(PIN
 node apps/local/e2e/sheettest.cjs $PW $OUT    # 시트 연결(drive.file 더 받기)→시트 고르기→미리보기→표 블록
 node apps/local/e2e/viewtest.cjs $PW $OUT     # 가져오기로 AI 화면 블록 → 그려짐·링크/그림 걸러짐·바깥 요청이 망에 안 나감
 node apps/local/e2e/offline.cjs $PW           # 인터넷 끊고 새로 고쳐도 보드가 열림
+node apps/local/e2e/menutest.cjs $PW $OUT     # 처음 안내(열쇠→고치는 법→메뉴 추천, 가짜 Claude)→고른 메뉴 만들기→위쪽 줄에서 누르기
 ```

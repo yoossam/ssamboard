@@ -236,6 +236,8 @@ export interface SettingsDto {
   /** 이번 달(사용자 시간대)의 예상 비용 */
   month_cost: number;
   usage: { month: string; cost_usd: number; input_tokens: number; output_tokens: number }[];
+  /** 처음 접속 안내(AI 열쇠 → 고치는 법 → 메뉴 추천)를 마쳤거나 건너뛰었는지 */
+  onboarded: boolean;
 }
 
 export interface ConnectorDto {

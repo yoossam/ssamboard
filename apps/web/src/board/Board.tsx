@@ -11,6 +11,7 @@ import { useApp } from '../lib/store';
 import { BlockBody, BlockCount, TileLines } from './blocks';
 import { BlockStyleButton } from './memo';
 import { BoardStyleButton } from './boardStyle';
+import { MenuBar } from '../menu/menu';
 
 // 한 페이지 보드(ONE-1). PC는 24칸 격자에 블록을 놓고, 휴대폰은 2열 타일로 보여준다.
 
@@ -57,6 +58,7 @@ export async function togglePin(block: BlockDto): Promise<void> {
 
 function TopBar() {
   const open = useApp((s) => s.open);
+  const phone = useIsPhone();
   const editMode = useApp((s) => s.editMode);
   const setEditMode = useApp((s) => s.setEditMode);
   return (
@@ -65,11 +67,13 @@ function TopBar() {
       <div className="flex h-10 items-center gap-1 px-1">
         <IconButton icon="menu" label="메뉴" size={36} onClick={() => open({ kind: 'menu' })} />
         <h1 className="text-sm font-bold text-accent">쌤보드</h1>
-        <span className="min-w-0 truncate text-xs text-sub">{dateLabel(new Date())}</span>
-        <span className="flex-1" />
+        <span className="min-w-0 shrink-0 truncate text-xs text-sub">{dateLabel(new Date())}</span>
+        {/* 내 메뉴(위쪽 바로가기) — 휴대폰은 아래 한 줄 */}
+        {phone ? <span className="flex-1" /> : <MenuBar />}
         <BoardStyleButton />
         <IconButton icon="more" label="더보기" size={36} onClick={() => open({ kind: 'more' })} />
       </div>
+      {phone && <MenuBar />}
       {editMode && (
         <div className="flex h-11 items-center justify-between gap-3 border-t border-rule bg-tint pr-1.5 pl-4">
           <p className="min-w-0 truncate text-sm font-medium text-accent">배치 편집 중 · 머리줄을 끌어 옮기고 모서리로 크기를 조절합니다</p>
