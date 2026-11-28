@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import GridLayout from 'react-grid-layout';
 import { blockBg, boardBg, GRID_COLS, memoColor, MIN_BLOCK_SIZE, mobileOrder, titleColor, type BlockDto, type BoardDto, type GridPos } from '@jarvis/shared';
 import { BLOCK_ICON, Icon } from '../components/Icon';
@@ -86,6 +86,24 @@ function TopBar() {
   );
 }
 
+/**
+ * 블록 글자 배율: 블록이 작아지면 글자도 작게, 넓고 높으면 조금 크게. 너비 380px·높이 260px 이면 1.
+ * 읽기 어렵지 않게 0.88(본문 약 13px) 아래로는 줄이지 않고, 1.15 위로는 키우지 않는다.
+ */
+export const BLOCK_SCALE_MIN = 0.88;
+export const BLOCK_SCALE_MAX = 1.15;
+export function blockScale(size: { width: number; height: number }): number {
+  if (!size.width || !size.height) return 1;
+  const s = Math.min(size.width / 380, size.height / 260);
+  return Math.round(Math.min(BLOCK_SCALE_MAX, Math.max(BLOCK_SCALE_MIN, s)) * 100) / 100;
+}
+
+/** 머리줄의 '크게 보기' — 블록을 큰 창으로 */
+function ExpandButton({ block }: { block: BlockDto }) {
+  const open = useApp((s) => s.open);
+  return <IconButton icon="expand" label="크게 보기" size={32} onClick={() => open({ kind: 'block', blockId: block.id })} />;
+}
+
 /** 메모(붙임쪽지): 종이 색으로 칠하고, 얇은 머리띠를 잡아 언제든 옮긴다. 제목을 누르면 AI에 알려 줄 블록으로 고른다. */
 function MemoCard({ block }: { block: BlockDto }) {
   const editMode = useApp((s) => s.editMode);
@@ -93,8 +111,14 @@ function MemoCard({ block }: { block: BlockDto }) {
   const toggleSelected = useApp((s) => s.toggleSelected);
   const open = useApp((s) => s.open);
   const pressedAt = useRef<{ x: number; y: number } | null>(null);
+  const [ref, size] = useSize<HTMLElement>();
   return (
-    <article data-memo={memoColor(block.config.color)} className={`memo-card memo-paper flex h-full flex-col overflow-hidden rounded-xl border shadow-sm ${isSelected ? 'border-accent! ring-2 ring-accent/25' : ''}`}>
+    <article
+      ref={ref}
+      data-memo={memoColor(block.config.color)}
+      style={{ '--fs': blockScale(size) } as CSSProperties}
+      className={`memo-card memo-paper block-scale flex h-full flex-col overflow-hidden rounded-xl border shadow-sm ${isSelected ? 'border-accent! ring-2 ring-accent/25' : ''}`}
+    >
       <header className={`memo-bar flex h-9 shrink-0 items-center pr-0.5 pl-3 ${block.pinned ? '' : 'block-drag'}`}>
         <button
           type="button"
@@ -110,10 +134,11 @@ function MemoCard({ block }: { block: BlockDto }) {
           className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-left"
         >
           {isSelected && <Icon name="check" size={16} className="shrink-0 text-accent" />}
-          <h2 data-title-color={titleColor(block.config.title_color)} className="truncate text-[15px] font-bold">{block.title}</h2>
+          <h2 data-title-color={titleColor(block.config.title_color)} className="truncate text-[calc(15px*var(--fs,1))] font-bold">{block.title}</h2>
         </button>
         <span className="no-drag flex shrink-0 items-center">
           <BlockStyleButton block={block} />
+          <ExpandButton block={block} />
           {editMode && (
             <button type="button" aria-label="블록 편집" title="블록 편집" onClick={() => open({ kind: 'block-edit', blockId: block.id })} className="flex size-8 shrink-0 items-center justify-center rounded-lg text-ink/60 hover:bg-black/5 hover:text-ink">
               <Icon name="edit" size={18} />
@@ -143,10 +168,13 @@ function BlockCard({ block }: { block: BlockDto }) {
   const open = useApp((s) => s.open);
   const pressedAt = useRef<{ x: number; y: number } | null>(null);
   const bg = blockBg(block);
+  const [ref, size] = useSize<HTMLElement>();
   return (
     <article
+      ref={ref}
       data-memo={bg === 'white' ? undefined : bg}
-      className={`memo-card flex h-full flex-col overflow-hidden rounded-xl border ${bg === 'white' ? 'bg-card' : 'memo-paper'} ${isSelected ? 'border-accent! ring-2 ring-accent/25' : ''}`}
+      style={{ '--fs': blockScale(size) } as CSSProperties}
+      className={`memo-card block-scale flex h-full flex-col overflow-hidden rounded-xl border ${bg === 'white' ? 'bg-card' : 'memo-paper'} ${isSelected ? 'border-accent! ring-2 ring-accent/25' : ''}`}
     >
       <header className={`flex h-11 shrink-0 items-center gap-1 border-b border-rule pr-1 pl-3 ${block.pinned ? '' : 'block-drag'}`}>
         <button
@@ -163,11 +191,12 @@ function BlockCard({ block }: { block: BlockDto }) {
           className="flex min-w-0 flex-1 items-center gap-2 text-left"
         >
           <Icon name={isSelected ? 'check' : BLOCK_ICON[block.type]} size={18} className="text-accent" />
-          <h2 data-title-color={titleColor(block.config.title_color)} className="truncate text-[17px] font-bold">{block.title}</h2>
+          <h2 data-title-color={titleColor(block.config.title_color)} className="truncate text-[calc(17px*var(--fs,1))] font-bold">{block.title}</h2>
           <BlockCount block={block} />
         </button>
         <span className="no-drag flex shrink-0 items-center">
           <BlockStyleButton block={block} />
+          <ExpandButton block={block} />
           {editMode && <IconButton icon="edit" label="블록 편집" size={32} onClick={() => open({ kind: 'block-edit', blockId: block.id })} />}
           <IconButton icon="pin" label={block.pinned ? '고정 해제(자리 고정 풀기)' : '자리 고정'} size={32} active={block.pinned} onClick={() => togglePin(block)} />
         </span>

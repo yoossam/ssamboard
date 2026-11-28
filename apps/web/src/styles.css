@@ -252,3 +252,14 @@ body.react-draggable-transparent-selection .view-frame {
     animation: none;
   }
 }
+
+/*
+ * 블록 글자 비율(2026-11-28 선생님 "창이 작아지면 비율에 따라 글자도 작아지게"): 블록 카드가 --fs(블록 크기로 계산, Board.tsx blockScale)를 주면
+ * 그 안의 글자 크기 값만 그 배로 바꾼다 — 여백·배치는 그대로. 크게 보기 창은 --fs 를 1 보다 크게 준다.
+ */
+.block-scale {
+  --text-xs: calc(0.8125rem * var(--fs, 1));
+  --text-sm: calc(0.9375rem * var(--fs, 1));
+  --text-base: calc(1.125rem * var(--fs, 1));
+  font-size: calc(0.9375rem * var(--fs, 1));
+}

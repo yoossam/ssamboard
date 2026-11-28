@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useState, type ReactNode, type CSSProperties } from 'react';
 import { BLOCK_LABEL, BLOCK_TYPES, memoColor, TRASH_DAYS, type BlockDto, type BlockType, type EventDto, type NotificationDto, type TaskDto, type TrashItem } from '@jarvis/shared';
 import { useAi } from '../ai/AiWindow';
 import { BlockBody, PriorityTag, readAll } from '../board/blocks';
@@ -153,7 +153,7 @@ function BlockPanel({ blockId }: { blockId: string }) {
       title={block.title}
       icon={BLOCK_ICON[block.type]}
       onClose={close}
-      width={640}
+      width={960}
       tall
       flush
       footer={
@@ -167,7 +167,10 @@ function BlockPanel({ blockId }: { blockId: string }) {
         </ButtonRow>
       }
     >
-      <BlockBody block={block} full />
+      {/* 크게 보기: 글자를 보드보다 크게(블록 글자 비율 --fs, styles.css .block-scale) */}
+      <div className="block-scale flex min-h-0 flex-1 flex-col" style={{ '--fs': 1.3 } as CSSProperties}>
+        <BlockBody block={block} full />
+      </div>
     </Sheet>
   );
 }

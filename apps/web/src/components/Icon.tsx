@@ -33,6 +33,7 @@ const PATHS: Record<string, (string | { rect: [number, number, number, number, n
   panel: [{ rect: [4, 5, 16, 14, 2] }, 'M14 5v14'],
   modal: [{ rect: [4, 5, 16, 14, 2] }, 'M8 9h8v6H8z'],
   grid: ['M5 5h6v6H5zM13 5h6v6h-6zM5 13h6v6H5zM13 13h6v6h-6z'],
+  expand: ['M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5M4 4l6 6M20 4l-6 6M4 20l6-6M20 20l-6-6'],
   paste: [{ rect: [6, 5, 12, 15, 2] }, 'M9 5V3h6v2M9 11h6M9 15h4'],
   info: ['M12 8h.01M12 11v5M12 21a9 9 0 100-18 9 9 0 000 18z'],
   sheet: [{ rect: [5, 3, 14, 18, 2] }, 'M5 9h14M5 15h14M11 9v12'],
