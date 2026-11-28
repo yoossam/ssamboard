@@ -1,5 +1,21 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Res } from '@nestjs/common';
-import { BLOCK_TYPES, readViewData, VIEW_CODE_MAX, VIEW_CSS_MAX, type BlockDto, type BoardDto, type EventDto, type TaskDto, MEMO_COLORS, TITLE_COLORS, BOARD_BGS, type BoardTheme } from '@jarvis/shared';
+import {
+  BLOCK_TYPES,
+  readViewData,
+  VIEW_CODE_MAX,
+  VIEW_CSS_MAX,
+  type BlockDto,
+  type BoardDto,
+  type EventDto,
+  type TaskDto,
+  MEMO_COLORS,
+  TITLE_COLORS,
+  BOARD_BGS,
+  type BoardTheme,
+  EVENT_DAYS,
+  NOTI_SHOWS,
+  TASK_FILTERS,
+} from '@jarvis/shared';
 import type { Response } from 'express';
 import { Auth, type AuthCtx } from '../auth/auth.types';
 import { bad, isoOrNull, notFound, obj, oneOf, optStr, str, uuid } from '../common/http';
@@ -27,6 +43,12 @@ function checkConfig(config: Record<string, any> | undefined): Record<string, an
   // 꾸미기 값은 정해 둔 이름만(화면이 그 이름으로 색을 고른다 — 아무 글자나 받으면 CSS 로 새지 않게).
   if (config.bg !== undefined && !(MEMO_COLORS as readonly unknown[]).includes(config.bg)) bad('바탕색이 잘못됐습니다.');
   if (config.title_color !== undefined && !(TITLE_COLORS as readonly unknown[]).includes(config.title_color)) bad('제목 색이 잘못됐습니다.');
+  if (config.color !== undefined && !(MEMO_COLORS as readonly unknown[]).includes(config.color)) bad('종이 색이 잘못됐습니다.');
+  if (config.text !== undefined && (typeof config.text !== 'string' || config.text.length > 20_000)) bad('글은 20,000자까지입니다.');
+  // 할 일·일정·알림 블록의 보여 줄 내용(@jarvis/shared blockview.ts)
+  if (config.task_filter !== undefined && !(TASK_FILTERS as readonly unknown[]).includes(config.task_filter)) bad('할 일 보기 방식이 잘못됐습니다.');
+  if (config.event_days !== undefined && !(EVENT_DAYS as readonly unknown[]).includes(config.event_days)) bad('일정 기간이 잘못됐습니다.');
+  if (config.noti_show !== undefined && !(NOTI_SHOWS as readonly unknown[]).includes(config.noti_show)) bad('알림 보기 방식이 잘못됐습니다.');
   if (config.code !== undefined && (typeof config.code !== 'string' || config.code.length > VIEW_CODE_MAX)) bad(`그리기 코드는 ${VIEW_CODE_MAX.toLocaleString()}자까지입니다.`);
   if (config.css !== undefined && (typeof config.css !== 'string' || config.css.length > VIEW_CSS_MAX)) bad(`꾸밈(CSS)은 ${VIEW_CSS_MAX.toLocaleString()}자까지입니다.`);
   return config.data === undefined ? config : { ...config, data: readViewData(config.data) };
@@ -52,7 +74,9 @@ export class BoardsController {
   @Patch('boards/:id/theme')
   async theme(@Auth() ctx: AuthCtx, @Param('id') id: string, @Body() body: any): Promise<BoardTheme> {
     await this.check(ctx.user.id, id);
-    return this.boards.setTheme(ctx.user.id, { bg: oneOf(body?.bg, '바탕색', BOARD_BGS) });
+    return this.boards.setTheme(ctx.user.id, {
+      bg: oneOf(body?.bg, '바탕색', BOARD_BGS),
+    });
   }
 
   /** 블록 위치·크기·고정을 한 번에 저장한다. 화면은 변경 1초 뒤에 부른다(BRD-4). */
@@ -62,7 +86,12 @@ export class BoardsController {
     if (!Array.isArray(body?.blocks) || body.blocks.length > 200) bad('blocks가 잘못됐습니다.');
     await this.boards.saveLayout(
       ctx.user.id,
-      body.blocks.map((b: any) => ({ id: uuid(b?.id), layout_lg: b.layout_lg, layout_sm: b.layout_sm, pinned: typeof b.pinned === 'boolean' ? b.pinned : undefined })),
+      body.blocks.map((b: any) => ({
+        id: uuid(b?.id),
+        layout_lg: b.layout_lg,
+        layout_sm: b.layout_sm,
+        pinned: typeof b.pinned === 'boolean' ? b.pinned : undefined,
+      })),
     );
     return { ok: true };
   }
@@ -71,10 +100,10 @@ export class BoardsController {
   create(@Auth() ctx: AuthCtx, @Body() body: any): Promise<BlockDto> {
     return this.boards.createBlock(ctx.user.id, {
       type: oneOf(body?.type, '블록 종류', BLOCK_TYPES),
-      title: optStr(body.title, '제목', { max: 60 }),
-      config: body.config === undefined ? undefined : checkConfig(obj(body.config, 'config')),
-      source_table_id: body.source_table_id ? uuid(body.source_table_id, 'source_table_id') : null,
-      layout_lg: body.layout_lg,
+      title: optStr(body?.title, '제목', { max: 60 }),
+      config: body?.config === undefined ? undefined : checkConfig(obj(body.config, 'config')),
+      source_table_id: body?.source_table_id ? uuid(body.source_table_id, 'source_table_id') : null,
+      layout_lg: body?.layout_lg,
     });
   }
 
@@ -104,7 +133,10 @@ export class BoardsController {
     if (!block || block.type !== 'view') notFound('블록');
     const origin = new URL(config.publicUrl).origin;
     const nonce = newNonce();
-    const source = { code: typeof block!.config.code === 'string' ? block!.config.code : '', css: typeof block!.config.css === 'string' ? block!.config.css : '' };
+    const source = {
+      code: typeof block!.config.code === 'string' ? block!.config.code : '',
+      css: typeof block!.config.css === 'string' ? block!.config.css : '',
+    };
     // 문서에는 그리기 코드와 글꼴만 들어 있고 자료는 없다. 주소의 rev 가 코드마다 달라서, 이 브라우저 안에서는 한동안 다시 받지 않게 한다
     // (글꼴을 문서 안에 넣어 문서가 크다).
     sendHtml(res, viewDocument(source, nonce, embeddedFontCss(join(config.webDist, 'fonts'))), viewCsp(origin, nonce), { ...VIEW_EXTRA_HEADERS, 'Cache-Control': 'private, max-age=3600' });
@@ -128,7 +160,10 @@ export class ItemsController {
 
   @Post('tasks')
   createTask(@Auth() ctx: AuthCtx, @Body() body: any): Promise<TaskDto> {
-    return this.items.createTask(ctx.user.id, { title: str(body?.title, '제목', { max: 200 }), due_at: isoOrNull(body.due_at, '마감') });
+    return this.items.createTask(ctx.user.id, {
+      title: str(body?.title, '제목', { max: 200 }),
+      due_at: isoOrNull(body.due_at, '마감'),
+    });
   }
 
   @Patch('tasks/:id')
@@ -158,7 +193,11 @@ export class ItemsController {
   createEvent(@Auth() ctx: AuthCtx, @Body() body: any): Promise<EventDto> {
     const start = isoOrNull(body?.start_at, '시작');
     if (!start) bad('시작 시각이 필요합니다.');
-    return this.items.createEvent(ctx.user.id, { title: str(body.title, '제목', { max: 200 }), start_at: start!, end_at: isoOrNull(body.end_at, '끝') });
+    return this.items.createEvent(ctx.user.id, {
+      title: str(body?.title, '제목', { max: 200 }),
+      start_at: start!,
+      end_at: isoOrNull(body?.end_at, '끝'),
+    });
   }
 
   @Patch('events/:id')

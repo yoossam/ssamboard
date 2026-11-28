@@ -159,7 +159,8 @@ export class AnthropicAdapter implements LlmAdapter {
       {
         model: req.model,
         max_tokens: req.maxTokens ?? 8000,
-        system: req.system,
+        // 규칙·기억(자주 같음)은 캐시하고, 지금 시각처럼 매번 바뀌는 것은 캐시 뒤에 붙인다(프롬프트 캐싱 — 같은 앞부분은 할인)
+        system: [{ type: 'text', text: req.system, cache_control: { type: 'ephemeral' } }, ...(req.systemTail ? [{ type: 'text', text: req.systemTail }] : [])],
         messages: req.messages,
         ...(req.tools?.length ? { tools: req.tools } : {}),
         stream: true,

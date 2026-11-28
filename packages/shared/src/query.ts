@@ -69,10 +69,21 @@ export function validateQuery(input: unknown, schema: TableSchema): QueryValidat
     const c = col(f.col_id);
     if (typeof c === 'string') return { ok: false, error: c };
     const op = f.op as FilterOp;
-    if (!FILTER_OPS.includes(op)) return { ok: false, error: `허용하지 않는 연산자입니다: ${String(f.op)}` };
+    if (!FILTER_OPS.includes(op))
+      return {
+        ok: false,
+        error: `허용하지 않는 연산자입니다: ${String(f.op)}`,
+      };
     if (['gt', 'gte', 'lt', 'lte', 'between'].includes(op) && !ORDERED.includes(c.type))
-      return { ok: false, error: `${c.name} 컬럼(${c.type})에는 ${op}를 쓸 수 없습니다.` };
-    if (op === 'contains' && !TEXTUAL.includes(c.type)) return { ok: false, error: `${c.name} 컬럼에는 contains를 쓸 수 없습니다.` };
+      return {
+        ok: false,
+        error: `${c.name} 컬럼(${c.type})에는 ${op}를 쓸 수 없습니다.`,
+      };
+    if (op === 'contains' && !TEXTUAL.includes(c.type))
+      return {
+        ok: false,
+        error: `${c.name} 컬럼에는 contains를 쓸 수 없습니다.`,
+      };
     if (op === 'is_null') {
       filter.push({ col_id: c.id, op, value: f.value !== false });
     } else if (op === 'contains') {
@@ -80,13 +91,28 @@ export function validateQuery(input: unknown, schema: TableSchema): QueryValidat
       filter.push({ col_id: c.id, op, value: f.value });
     } else if (op === 'in' || op === 'between') {
       if (!Array.isArray(f.value) || f.value.length === 0 || (op === 'between' && f.value.length !== 2))
-        return { ok: false, error: `${op}에는 ${op === 'between' ? '값 두 개' : '값 목록'}가 필요합니다.` };
+        return {
+          ok: false,
+          error: `${op}에는 ${op === 'between' ? '값 두 개' : '값 목록'}가 필요합니다.`,
+        };
       const vs = f.value.map((v) => value(c, v));
-      if (vs.some((v) => !v.ok)) return { ok: false, error: `${c.name} 컬럼 타입(${c.type})에 맞지 않는 값입니다.` };
-      filter.push({ col_id: c.id, op, value: vs.map((v) => (v as { v: unknown }).v) });
+      if (vs.some((v) => !v.ok))
+        return {
+          ok: false,
+          error: `${c.name} 컬럼 타입(${c.type})에 맞지 않는 값입니다.`,
+        };
+      filter.push({
+        col_id: c.id,
+        op,
+        value: vs.map((v) => (v as { v: unknown }).v),
+      });
     } else {
       const v = value(c, f.value);
-      if (!v.ok) return { ok: false, error: `${c.name} 컬럼 타입(${c.type})에 맞지 않는 값입니다.` };
+      if (!v.ok)
+        return {
+          ok: false,
+          error: `${c.name} 컬럼 타입(${c.type})에 맞지 않는 값입니다.`,
+        };
       filter.push({ col_id: c.id, op, value: v.v });
     }
   }
@@ -99,7 +125,11 @@ export function validateQuery(input: unknown, schema: TableSchema): QueryValidat
     if (typeof c === 'string') return { ok: false, error: c };
     if (item.bucket !== undefined && item.bucket !== null) {
       if (!BUCKETS.includes(item.bucket as Bucket)) return { ok: false, error: `bucket은 day·week·month 중 하나입니다.` };
-      if (c.type !== 'date' && c.type !== 'datetime') return { ok: false, error: `${c.name} 컬럼은 날짜가 아니라 bucket을 쓸 수 없습니다.` };
+      if (c.type !== 'date' && c.type !== 'datetime')
+        return {
+          ok: false,
+          error: `${c.name} 컬럼은 날짜가 아니라 bucket을 쓸 수 없습니다.`,
+        };
       group_by.push({ col_id: c.id, bucket: item.bucket as Bucket });
     } else {
       group_by.push({ col_id: c.id });
@@ -108,7 +138,11 @@ export function validateQuery(input: unknown, schema: TableSchema): QueryValidat
 
   const agg: QueryAgg[] = [];
   for (const a of Array.isArray(input.agg) ? input.agg : []) {
-    if (!isObj(a) || !AGG_FNS.includes(a.fn as AggFn)) return { ok: false, error: '집계 함수는 count·sum·avg·min·max 중 하나입니다.' };
+    if (!isObj(a) || !AGG_FNS.includes(a.fn as AggFn))
+      return {
+        ok: false,
+        error: '집계 함수는 count·sum·avg·min·max 중 하나입니다.',
+      };
     const fn = a.fn as AggFn;
     if (fn === 'count' && (a.col_id === undefined || a.col_id === null)) {
       agg.push({ fn });
@@ -116,7 +150,11 @@ export function validateQuery(input: unknown, schema: TableSchema): QueryValidat
     }
     const c = col(a.col_id);
     if (typeof c === 'string') return { ok: false, error: c };
-    if ((fn === 'sum' || fn === 'avg') && c.type !== 'number') return { ok: false, error: `${c.name} 컬럼은 숫자가 아니라 ${fn}을 쓸 수 없습니다.` };
+    if ((fn === 'sum' || fn === 'avg') && c.type !== 'number')
+      return {
+        ok: false,
+        error: `${c.name} 컬럼은 숫자가 아니라 ${fn}을 쓸 수 없습니다.`,
+      };
     if ((fn === 'min' || fn === 'max') && !ORDERED.includes(c.type)) return { ok: false, error: `${c.name} 컬럼에는 ${fn}을 쓸 수 없습니다.` };
     agg.push({ col_id: c.id, fn });
   }
@@ -126,6 +164,7 @@ export function validateQuery(input: unknown, schema: TableSchema): QueryValidat
   const sort: QuerySort[] = [];
   for (const s of Array.isArray(input.sort) ? input.sort : []) {
     if (!isObj(s)) return { ok: false, error: 'sort 항목이 잘못됐습니다.' };
+    if (s.dir !== undefined && s.dir !== 'asc' && s.dir !== 'desc') return { ok: false, error: "sort.dir 은 'asc' 나 'desc' 만 됩니다." };
     const dir = s.dir === 'desc' ? 'desc' : 'asc';
     if (typeof s.agg === 'number') {
       if (!Number.isInteger(s.agg) || s.agg < 0 || s.agg >= agg.length) return { ok: false, error: 'sort.agg가 agg 범위를 벗어났습니다.' };
@@ -134,7 +173,11 @@ export function validateQuery(input: unknown, schema: TableSchema): QueryValidat
     }
     const c = col(s.col_id);
     if (typeof c === 'string') return { ok: false, error: c };
-    if (grouped && !group_by.some((g) => g.col_id === c.id)) return { ok: false, error: `집계할 때는 group_by에 든 컬럼으로만 정렬할 수 있습니다: ${c.name}` };
+    if (grouped && !group_by.some((g) => g.col_id === c.id))
+      return {
+        ok: false,
+        error: `집계할 때는 group_by에 든 컬럼으로만 정렬할 수 있습니다: ${c.name}`,
+      };
     sort.push({ col_id: c.id, dir });
   }
 
@@ -146,5 +189,15 @@ export function validateQuery(input: unknown, schema: TableSchema): QueryValidat
   return { ok: true, spec: { filter, group_by, agg, sort, limit } };
 }
 
-export const AGG_LABEL: Record<AggFn, string> = { count: '건수', sum: '합계', avg: '평균', min: '최소', max: '최대' };
-export const BUCKET_LABEL: Record<Bucket, string> = { day: '일', week: '주', month: '월' };
+export const AGG_LABEL: Record<AggFn, string> = {
+  count: '건수',
+  sum: '합계',
+  avg: '평균',
+  min: '최소',
+  max: '최대',
+};
+export const BUCKET_LABEL: Record<Bucket, string> = {
+  day: '일',
+  week: '주',
+  month: '월',
+};

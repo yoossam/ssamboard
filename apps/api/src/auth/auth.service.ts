@@ -63,8 +63,20 @@ export class AuthService {
       [sha256(token), userId, deviceName(ua), ua, config.sessionDays],
     );
     const maxAge = config.sessionDays * 86_400_000;
-    res.cookie(SID_COOKIE, token, { httpOnly: true, secure: config.cookieSecure, sameSite: 'lax', path: '/', maxAge });
-    res.cookie(CSRF_COOKIE, randomToken(18), { httpOnly: false, secure: config.cookieSecure, sameSite: 'lax', path: '/', maxAge });
+    res.cookie(SID_COOKIE, token, {
+      httpOnly: true,
+      secure: config.cookieSecure,
+      sameSite: 'lax',
+      path: '/',
+      maxAge,
+    });
+    res.cookie(CSRF_COOKIE, randomToken(18), {
+      httpOnly: false,
+      secure: config.cookieSecure,
+      sameSite: 'lax',
+      path: '/',
+      maxAge,
+    });
   }
 
   /**
@@ -82,10 +94,23 @@ export class AuthService {
     const token = req.cookies?.[SID_COOKIE];
     if (!renewed || typeof token !== 'string') return;
     const maxAge = config.sessionDays * 86_400_000;
-    res.cookie(SID_COOKIE, token, { httpOnly: true, secure: config.cookieSecure, sameSite: 'lax', path: '/', maxAge });
+    res.cookie(SID_COOKIE, token, {
+      httpOnly: true,
+      secure: config.cookieSecure,
+      sameSite: 'lax',
+      path: '/',
+      maxAge,
+    });
     // 화면이 들고 있는 CSRF 값은 그대로 두고 만료만 늘린다.
     const csrf = req.cookies?.[CSRF_COOKIE];
-    if (typeof csrf === 'string') res.cookie(CSRF_COOKIE, csrf, { httpOnly: false, secure: config.cookieSecure, sameSite: 'lax', path: '/', maxAge });
+    if (typeof csrf === 'string')
+      res.cookie(CSRF_COOKIE, csrf, {
+        httpOnly: false,
+        secure: config.cookieSecure,
+        sameSite: 'lax',
+        path: '/',
+        maxAge,
+      });
   }
 
   clearCookies(res: Response): void {
@@ -127,28 +152,50 @@ export class AuthService {
    * 잠금 해제와 보안 설정 변경의 PIN 재입력(ONE-10, USR-6)에 함께 쓴다.
    */
   async verifyPin(ctx: AuthCtx, pin: unknown): Promise<void> {
-    const user = await this.db.one<UserRow>('select * from users where id = $1', [ctx.user.id]);
-    if (!user?.pin_hash) throw new BadRequestException('PIN이 아직 없습니다.');
-    if (user.pin_locked_until && user.pin_locked_until > new Date()) {
-      throw new HttpException({ message: 'PIN을 여러 번 틀려 잠시 막혔습니다.', pin_locked_until: user.pin_locked_until.toISOString() }, 429);
-    }
-    const ok = typeof pin === 'string' && PIN_RE.test(pin) && (await argon2.verify(user.pin_hash, pin));
-    if (ok) {
-      if (user.pin_fail_count > 0) await this.db.query('update users set pin_fail_count = 0, pin_locked_until = null where id = $1', [user.id]);
-      return;
-    }
-    const counted = await this.db.one<{ pin_fail_count: number }>(
-      'update users set pin_fail_count = pin_fail_count + 1 where id = $1 returning pin_fail_count',
-      [user.id],
-    );
-    const outcome = pinFailure(counted?.pin_fail_count ?? PIN_MAX_FAILS, new Date());
+    // 사용자 행을 잠그고(for update) 확인·실패 횟수를 한 트랜잭션에서 — 동시에 여러 번 보내 5회 제한을 넘는 것을 막는다(제미나이 검토).
+    // 실패 횟수는 커밋해야 하므로 오류는 트랜잭션이 끝난 뒤에 던진다.
+    const r = await this.db.tx(async (q) => {
+      const user = await q.one<UserRow>('select * from users where id = $1 for update', [ctx.user.id]);
+      if (!user?.pin_hash) return { kind: 'nopin' as const };
+      if (user.pin_locked_until && user.pin_locked_until > new Date()) return { kind: 'locked' as const, until: user.pin_locked_until };
+      const ok = typeof pin === 'string' && PIN_RE.test(pin) && (await argon2.verify(user.pin_hash, pin));
+      if (ok) {
+        if (user.pin_fail_count > 0) await q.query('update users set pin_fail_count = 0, pin_locked_until = null where id = $1', [user.id]);
+        return { kind: 'ok' as const };
+      }
+      const counted = await q.one<{ pin_fail_count: number }>('update users set pin_fail_count = pin_fail_count + 1 where id = $1 returning pin_fail_count', [user.id]);
+      const outcome = pinFailure(counted?.pin_fail_count ?? PIN_MAX_FAILS, new Date());
+      if (outcome.revokeAll) await q.query('update users set pin_fail_count = 0, pin_locked_until = $2 where id = $1', [user.id, outcome.lockedUntil]);
+      return { kind: 'fail' as const, outcome, userId: user.id };
+    });
+    if (r.kind === 'ok') return;
+    if (r.kind === 'nopin') throw new BadRequestException('PIN이 아직 없습니다.');
+    if (r.kind === 'locked')
+      throw new HttpException(
+        {
+          message: 'PIN을 여러 번 틀려 잠시 막혔습니다.',
+          pin_locked_until: r.until.toISOString(),
+        },
+        429,
+      );
     await this.audit.log(ctx, 'pin.fail');
-    if (outcome.revokeAll) {
-      await this.db.query('update users set pin_fail_count = 0, pin_locked_until = $2 where id = $1', [user.id, outcome.lockedUntil]);
-      await this.revokeAll(user.id);
-      throw new HttpException({ message: 'PIN을 5번 틀려 모든 기기에서 로그아웃했습니다. 15분 뒤에 다시 시도하세요.', revoked: true }, 401);
+    if (r.outcome.revokeAll) {
+      await this.revokeAll(r.userId);
+      throw new HttpException(
+        {
+          message: 'PIN을 5번 틀려 모든 기기에서 로그아웃했습니다. 15분 뒤에 다시 시도하세요.',
+          revoked: true,
+        },
+        401,
+      );
     }
-    throw new HttpException({ message: 'PIN이 맞지 않습니다.', attempts_left: outcome.attemptsLeft }, 403);
+    throw new HttpException(
+      {
+        message: 'PIN이 맞지 않습니다.',
+        attempts_left: r.outcome.attemptsLeft,
+      },
+      403,
+    );
   }
 
   async unlock(ctx: AuthCtx, pin: unknown): Promise<void> {
@@ -166,18 +213,12 @@ export class AuthService {
   }
 
   async revoke(userId: string, sessionId: string): Promise<boolean> {
-    const rows = await this.db.query('update sessions set revoked_at = now() where id = $1 and user_id = $2 and revoked_at is null returning id', [
-      sessionId,
-      userId,
-    ]);
+    const rows = await this.db.query('update sessions set revoked_at = now() where id = $1 and user_id = $2 and revoked_at is null returning id', [sessionId, userId]);
     return rows.length > 0;
   }
 
   async revokeAll(userId: string, exceptSessionId?: string): Promise<void> {
-    await this.db.query('update sessions set revoked_at = now() where user_id = $1 and revoked_at is null and id is distinct from $2', [
-      userId,
-      exceptSessionId ?? null,
-    ]);
+    await this.db.query('update sessions set revoked_at = now() where user_id = $1 and revoked_at is null and id is distinct from $2', [userId, exceptSessionId ?? null]);
   }
 
   async listSessions(ctx: AuthCtx): Promise<SessionDto[]> {
@@ -208,7 +249,11 @@ export class AuthService {
   /** 로그인 전 화면에 알려 줄 것: 로그인 방식과, 암호 방식이면 아직 주인 계정이 없는지. */
   async publicStatus(): Promise<AuthStatus> {
     if (config.loginMode === 'google') return { authenticated: false, login_mode: 'google' };
-    return { authenticated: false, login_mode: 'password', setup_needed: !(await this.hasPasswordOwner()) };
+    return {
+      authenticated: false,
+      login_mode: 'password',
+      setup_needed: !(await this.hasPasswordOwner()),
+    };
   }
 
   private async hasPasswordOwner(): Promise<boolean> {
@@ -236,7 +281,9 @@ export class AuthService {
     const email = typeof input.email === 'string' ? input.email.trim().toLowerCase() : '';
     if (!EMAIL_RE.test(email) || email.length > 200) throw new BadRequestException('이메일을 확인해 주세요.');
     const name = typeof input.name === 'string' ? input.name.trim().slice(0, 40) : '';
-    const hash = await argon2.hash(this.checkPassword(input.password), { type: argon2.argon2id });
+    const hash = await argon2.hash(this.checkPassword(input.password), {
+      type: argon2.argon2id,
+    });
     const id = await this.db.tx(async (q) => {
       await q.query('select pg_advisory_xact_lock(hashtext($1))', ['ssamboard:setup-owner']);
       const taken = await q.query('select 1 from users limit 1');

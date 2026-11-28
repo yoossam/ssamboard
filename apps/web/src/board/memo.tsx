@@ -1,4 +1,4 @@
-import { useEffect, useState, type MouseEvent } from 'react';
+import { useEffect, useState, type MouseEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { blockBg, MEMO_COLORS, MEMO_COLOR_LABEL, TITLE_COLORS, TITLE_COLOR_LABEL, titleColor, type BlockDto, type BoardDto, type MemoColor, type TitleColor } from '@jarvis/shared';
 import { Icon } from '../components/Icon';
@@ -74,7 +74,22 @@ export function MemoColorDots({ value, onPick }: { value: MemoColor; onPick: (co
 const POPOVER_WIDTH = 306;
 
 /** 블록 머리띠의 꾸미기 단추(바탕·제목 색). 누르면 그 아래에 색 동그라미가 뜬다(격자 칸이 좁아도 잘리지 않게 화면 맨 위 층에 그린다). */
-export function BlockStyleButton({ block, className }: { block: BlockDto; className?: string }) {
+/**
+ * actions 를 주면 머리줄의 ⋯ 단추가 된다 — 편집·고정 같은 동작이 위에, 꾸미기 색이 아래에(2026-11-28 UX 토론 D: 머리줄 단추 줄이기).
+ */
+export function BlockStyleButton({
+  block,
+  className,
+  icon = 'palette',
+  label = '꾸미기(바탕·제목 색)',
+  actions,
+}: {
+  block: BlockDto;
+  className?: string;
+  icon?: string;
+  label?: string;
+  actions?: (close: () => void) => ReactNode;
+}) {
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
   const open = at !== null;
 
@@ -108,18 +123,19 @@ export function BlockStyleButton({ block, className }: { block: BlockDto; classN
       <button
         type="button"
         data-memo-colors=""
-        aria-label="꾸미기(바탕·제목 색)"
-        title="꾸미기(바탕·제목 색)"
+        aria-label={label}
+        title={label}
         aria-haspopup="true"
         aria-pressed={open}
         onClick={toggle}
         className={className ?? 'memo-tool flex size-8 shrink-0 items-center justify-center rounded-lg text-ink/60 hover:bg-black/5 hover:text-ink'}
       >
-        <Icon name="palette" size={18} />
+        <Icon name={icon} size={18} />
       </button>
       {open &&
         createPortal(
           <div data-memo-colors="" className="anim-fade fixed z-[35] rounded-xl border bg-card p-3 shadow-lg" style={{ left: at.x, top: at.y, width: POPOVER_WIDTH }}>
+            {actions && <div className="-mx-1 -mt-1 mb-2 flex flex-col border-b border-rule pb-2">{actions(() => setAt(null))}</div>}
             <p className="mb-2 text-xs font-medium text-sub">바탕</p>
             <MemoColorDots value={blockBg(block)} onPick={(bg) => void setBlockStyle(block, { bg })} />
             <p className="mt-3 mb-2 text-xs font-medium text-sub">제목 글자색</p>

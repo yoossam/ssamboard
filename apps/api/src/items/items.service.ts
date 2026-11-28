@@ -19,19 +19,19 @@ export class ItemsService {
   }
 
   async createTask(userId: string, input: { title: string; due_at: string | null }, q: Queryable = this.db, commandId: string | null = null): Promise<TaskDto> {
-    return (await q.one<TaskDto>(`insert into tasks(user_id, title, due_at, command_id) values ($1, $2, $3, $4) returning ${TASK_COLUMNS}`, [
-      userId,
-      input.title,
-      input.due_at,
-      commandId,
-    ]))!;
+    return (await q.one<TaskDto>(`insert into tasks(user_id, title, due_at, command_id) values ($1, $2, $3, $4) returning ${TASK_COLUMNS}`, [userId, input.title, input.due_at, commandId]))!;
   }
 
   /** due_at을 지우려면 clear_due를 true로 준다. 마감이 바뀌면 알림을 다시 보낼 수 있게 reminded_at을 비운다. */
   updateTask(
     userId: string,
     id: string,
-    patch: { title?: string; due_at?: string | null; status?: 'open' | 'done'; note?: string },
+    patch: {
+      title?: string;
+      due_at?: string | null;
+      status?: 'open' | 'done';
+      note?: string;
+    },
     q: Queryable = this.db,
   ): Promise<TaskDto | null> {
     const setDue = patch.due_at !== undefined;
@@ -57,19 +57,15 @@ export class ItemsService {
     return q.query<EventDto>(
       `select ${EVENT_COLUMNS} from events
         where user_id = $1 and deleted_at is null
-          and start_at >= coalesce($3::timestamptz, date_trunc('day', now() at time zone $2) at time zone $2)
+          -- 기간과 겹치는 일정(어제 시작해 오늘까지 이어지는 것 포함 — 코덱스 검토)
+          and coalesce(end_at, start_at) >= coalesce($3::timestamptz, date_trunc('day', now() at time zone $2) at time zone $2)
           and start_at <  coalesce($4::timestamptz, (date_trunc('day', now() at time zone $2) + interval '1 day') at time zone $2)
         order by start_at limit 200`,
       [userId, timezone, from ?? null, to ?? null],
     );
   }
 
-  async createEvent(
-    userId: string,
-    input: { title: string; start_at: string; end_at: string | null },
-    q: Queryable = this.db,
-    commandId: string | null = null,
-  ): Promise<EventDto> {
+  async createEvent(userId: string, input: { title: string; start_at: string; end_at: string | null }, q: Queryable = this.db, commandId: string | null = null): Promise<EventDto> {
     return (await q.one<EventDto>(`insert into events(user_id, title, start_at, end_at, command_id) values ($1, $2, $3, $4, $5) returning ${EVENT_COLUMNS}`, [
       userId,
       input.title,

@@ -1,5 +1,18 @@
 import { Injectable } from '@nestjs/common';
-import { BLOCK_LABEL, BLOCK_TYPES, DEFAULT_BLOCK_SIZE, GRID_COLS, GRID_MAX_H, placeBlock, type BlockDto, type BlockType, type BoardDto, type GridPos, type PlaceHint, type BoardTheme } from '@jarvis/shared';
+import {
+  BLOCK_LABEL,
+  BLOCK_TYPES,
+  DEFAULT_BLOCK_SIZE,
+  GRID_COLS,
+  GRID_MAX_H,
+  placeBlock,
+  type BlockDto,
+  type BlockType,
+  type BoardDto,
+  type GridPos,
+  type PlaceHint,
+  type BoardTheme,
+} from '@jarvis/shared';
 import { bad } from '../common/http';
 import { Db, json, type Queryable } from '../db/db.service';
 
@@ -28,11 +41,16 @@ export class BoardsService {
   async currentBoard(userId: string, q: Queryable = this.db): Promise<{ id: string; name: string; theme: BoardTheme }> {
     const existing = await q.one('select id, name, theme from boards where user_id = $1 order by created_at limit 1', [userId]);
     if (existing) return existing;
-    const board = (await q.one('insert into boards(user_id) values ($1) returning id, name, theme', [userId]))!;
-    for (const type of ['events', 'tasks', 'notifications', 'memo'] as BlockType[]) {
-      await this.createBlock(userId, { type }, q, null, board.id);
-    }
-    return board;
+    // 처음 들어와 화면이 동시에 여러 요청을 보내도 보드는 하나만(사용자별 잠금 뒤 다시 본다 — 제미나이 검토)
+    const make = async (t: Queryable) => {
+      await t.query("select pg_advisory_xact_lock(hashtext('board:' || $1::text))", [userId]);
+      const again = await t.one('select id, name, theme from boards where user_id = $1 order by created_at limit 1', [userId]);
+      if (again) return again;
+      const board = (await t.one('insert into boards(user_id) values ($1) returning id, name, theme', [userId]))!;
+      for (const type of ['events', 'tasks', 'notifications', 'memo'] as BlockType[]) await this.createBlock(userId, { type }, t, null, board.id);
+      return board;
+    };
+    return q === this.db ? this.db.tx(make) : make(q);
   }
 
   async listBlocks(userId: string, q: Queryable = this.db): Promise<BlockDto[]> {
@@ -58,9 +76,17 @@ export class BoardsService {
 
   async createBlock(userId: string, input: NewBlock, q: Queryable = this.db, commandId: string | null = null, boardId?: string): Promise<BlockDto> {
     if (!BLOCK_TYPES.includes(input.type)) bad('블록 종류가 잘못됐습니다.');
+    // 원본 표는 이 사용자 것만(제미나이 검토)
+    if (input.source_table_id && !(await q.one('select 1 as hit from data_tables where id = $1 and user_id = $2 and deleted_at is null', [input.source_table_id, userId]))) bad('원본 표가 없습니다.');
     const board = boardId ?? (await this.currentBoard(userId, q)).id;
     const existing = await q.query<{ layout_lg: GridPos }>('select layout_lg from blocks where board_id = $1 and deleted_at is null', [board]);
-    const layout = input.layout_lg ? checkLayout(input.layout_lg) : placeBlock(existing.map((b) => b.layout_lg), DEFAULT_BLOCK_SIZE[input.type], input.hint);
+    const layout = input.layout_lg
+      ? checkLayout(input.layout_lg)
+      : placeBlock(
+          existing.map((b) => b.layout_lg),
+          DEFAULT_BLOCK_SIZE[input.type],
+          input.hint,
+        );
     const title = (input.title ?? '').trim().slice(0, 60) || BLOCK_LABEL[input.type];
     return (await q.one<BlockDto>(
       `insert into blocks(user_id, board_id, type, title, layout_lg, config, source_table_id, command_id)
@@ -73,7 +99,12 @@ export class BoardsService {
   async updateBlock(
     userId: string,
     id: string,
-    patch: { title?: string; config?: Record<string, any>; pinned?: boolean; layout_lg?: GridPos },
+    patch: {
+      title?: string;
+      config?: Record<string, any>;
+      pinned?: boolean;
+      layout_lg?: GridPos;
+    },
     q: Queryable = this.db,
   ): Promise<BlockDto | null> {
     return q.one<BlockDto>(
@@ -102,7 +133,15 @@ export class BoardsService {
   }
 
   /** 블록 위치·크기·고정·휴대폰 순서를 한 번에 저장한다(BRD-4, MOB-1). */
-  async saveLayout(userId: string, items: { id: string; layout_lg?: GridPos; layout_sm?: { order: number } | null; pinned?: boolean }[]): Promise<void> {
+  async saveLayout(
+    userId: string,
+    items: {
+      id: string;
+      layout_lg?: GridPos;
+      layout_sm?: { order: number } | null;
+      pinned?: boolean;
+    }[],
+  ): Promise<void> {
     await this.db.tx(async (q) => {
       for (const item of items) {
         await q.query(

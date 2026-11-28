@@ -29,13 +29,24 @@ export class TablesController {
       const parsed = await this.uploads.read(ctx.user.id, uuid(body.upload_id, 'upload_id'));
       const sourceIndex = (body.columns as any[]).map((c, i) => (Number.isInteger(c?.source) ? c.source : i));
       if (sourceIndex.some((s) => s < 0 || s >= parsed.header.length)) bad('컬럼의 원본 열 번호가 잘못됐습니다.');
-      const result = await this.tables.create(ctx.user.id, { name, columns, rawRows: parsed.body, sourceIndex, origin: 'upload' });
+      const result = await this.tables.create(ctx.user.id, {
+        name,
+        columns,
+        rawRows: parsed.body,
+        sourceIndex,
+        origin: 'upload',
+      });
       await this.uploads.attach(ctx.user.id, body.upload_id, result.table.id);
       return result;
     }
     const rows = Array.isArray(body.rows) ? body.rows : [];
     if (rows.some((r: unknown) => !Array.isArray(r))) bad('rows의 각 행은 배열이어야 합니다.');
-    return this.tables.create(ctx.user.id, { name, columns, rawRows: rows, origin: 'manual' });
+    return this.tables.create(ctx.user.id, {
+      name,
+      columns,
+      rawRows: rows,
+      origin: 'manual',
+    });
   }
 
   @Get(':id')
@@ -79,7 +90,13 @@ export class TablesController {
   async addRow(@Auth() ctx: AuthCtx, @Param('id') id: string, @Body() body: any): Promise<{ added: number }> {
     const rows = Array.isArray(body?.rows) ? body.rows : [obj(body?.values, 'values')];
     if (rows.length === 0 || rows.length > 1000) bad('한 번에 1~1,000행까지 넣을 수 있습니다.');
-    return { added: await this.tables.addRows(ctx.user.id, uuid(id), rows.map((r: unknown) => obj(r, '행'))) };
+    return {
+      added: await this.tables.addRows(
+        ctx.user.id,
+        uuid(id),
+        rows.map((r: unknown) => obj(r, '행')),
+      ),
+    };
   }
 
   @Patch(':id/rows/:rowId')
@@ -104,11 +121,19 @@ export class TablesController {
   async append(@Auth() ctx: AuthCtx, @Param('id') id: string, @Body() body: any): Promise<{ added: number; unmatched: string[] }> {
     const table = await this.tables.require(ctx.user.id, uuid(id));
     const parsed = await this.uploads.read(ctx.user.id, uuid(body?.upload_id, 'upload_id'));
-    const pairs = table.schema.columns.map((c) => ({ col: c, source: parsed.header.findIndex((h) => h.trim() === c.name) })).filter((p) => p.source >= 0);
+    const pairs = table.schema.columns
+      .map((c) => ({
+        col: c,
+        source: parsed.header.findIndex((h) => h.trim() === c.name),
+      }))
+      .filter((p) => p.source >= 0);
     if (pairs.length === 0) bad('머리글 이름이 같은 컬럼이 하나도 없습니다.');
     const rows = parsed.body.map((cells) => Object.fromEntries(pairs.map((p) => [p.col.id, cells[p.source]])));
-    let added = 0;
-    for (let i = 0; i < rows.length; i += 1000) added += await this.tables.addRows(ctx.user.id, table.id, rows.slice(i, i + 1000));
-    return { added, unmatched: parsed.header.filter((h) => !pairs.some((p) => p.col.name === h.trim())) };
+    // 한 트랜잭션으로 — 중간에 실패하면 앞 조각만 들어가는 일이 없게(제미나이 검토)
+    const added = await this.tables.addRowsAll(ctx.user.id, table.id, rows);
+    return {
+      added,
+      unmatched: parsed.header.filter((h) => !pairs.some((p) => p.col.name === h.trim())),
+    };
   }
 }

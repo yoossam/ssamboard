@@ -10,11 +10,27 @@
 import type { Queryable } from '../db/db.service';
 
 /** 옮기는 표 — 가리켜지는 쪽이 먼저(넣는 순서). users 는 설정 몇 칸만 옮긴다. */
-export const SYNC_TABLES = ['users', 'boards', 'ai_commands', 'data_tables', 'data_rows', 'menu_items', 'blocks', 'tasks', 'events', 'notifications', 'conversations', 'messages', 'llm_runs'] as const;
+export const SYNC_TABLES = [
+  'users',
+  'boards',
+  'ai_commands',
+  'data_tables',
+  'data_rows',
+  'menu_items',
+  'memories',
+  'shares',
+  'blocks',
+  'tasks',
+  'events',
+  'notifications',
+  'conversations',
+  'messages',
+  'llm_runs',
+] as const;
 /** 나중에 더한 표 — 그 전에 만든 파일·드라이브 자료에는 없으므로 빈 표로 받는다(새 표를 SYNC_TABLES 에 더하면 여기에도). */
-export const ADDED_LATER_TABLES = ['menu_items'] as const;
+export const ADDED_LATER_TABLES = ['menu_items', 'memories', 'shares'] as const;
 /** 옮기지 않는 표(시험이 표 목록 전체와 견준다 — 새 표가 생기면 둘 중 하나에 넣는다). */
-export const LOCAL_ONLY_TABLES = ['schema_migrations', 'app_meta', 'allowed_emails', 'sessions', 'api_keys', 'connectors', 'uploads', 'audit_logs', 'shares'] as const;
+export const LOCAL_ONLY_TABLES = ['schema_migrations', 'app_meta', 'allowed_emails', 'sessions', 'api_keys', 'connectors', 'uploads', 'audit_logs'] as const;
 /** users 줄에서 옮기는 칸(이메일·PIN·암호·잠금은 옮기지 않는다) */
 const USER_FIELDS = ['name', 'timezone', 'monthly_budget', 'llm_provider', 'llm_model', 'onboarded_at'] as const;
 
@@ -31,16 +47,36 @@ async function lastMigration(q: Queryable): Promise<string> {
   return (await q.one<{ name: string }>('select name from schema_migrations order by name desc limit 1'))?.name ?? '';
 }
 
+/** 한 시점의 모습으로 내보낸다 — 표마다 따로 읽다가 그사이 바뀌면 부모 없는 줄이 담길 수 있어 한 트랜잭션(반복 읽기)에서(코덱스 검토). */
+export function exportSnapshot(db: { tx<T>(fn: (q: Queryable) => Promise<T>): Promise<T> }, userId: string): Promise<SyncData> {
+  return db.tx(async (q) => {
+    await q.query('set transaction isolation level repeatable read');
+    return exportData(q, userId);
+  });
+}
+
 /** 한 사용자의 자료를 JSON 으로. 날짜·jsonb 는 Postgres 가 글자로 바꿔 준다(row_to_json). */
 export async function exportData(q: Queryable, userId: string): Promise<SyncData> {
   const tables: SyncData['tables'] = {};
   for (const t of SYNC_TABLES) {
     // users 는 옮기는 설정 칸만 — PIN·암호 해시·잠금 상태는 파일·드라이브에 담지 않는다(코덱스 검토).
-    const sql = t === 'users' ? `select json_build_object(${USER_FIELDS.map((f) => `'${f}', ${f}`).join(', ')}) as r from users where id = $1` : `select row_to_json(x) as r from ${t} x where user_id = $1`;
+    // 공유 링크는 구글 문서로 만든 것만 옮긴다 — 끄기 기록을 다른 기기·다시 로그인한 뒤에도 갖도록(코덱스 검토). 서버의 /s/ 링크는 그 서버에만 둔다(다른 곳에 옮기면 새로 공개되므로).
+    const sql =
+      t === 'users'
+        ? `select json_build_object(${USER_FIELDS.map((f) => `'${f}', ${f}`).join(', ')}) as r from users where id = $1`
+        : t === 'shares'
+          ? `select row_to_json(x) as r from shares x where user_id = $1 and external_id is not null`
+          : `select row_to_json(x) as r from ${t} x where user_id = $1`;
     const rows = await q.query<{ r: Record<string, unknown> }>(sql, [userId]);
     tables[t] = rows.map((row) => row.r);
   }
-  return { format: 'ssamboard-data', version: 1, schema: await lastMigration(q), exported_at: new Date().toISOString(), tables };
+  return {
+    format: 'ssamboard-data',
+    version: 1,
+    schema: await lastMigration(q),
+    exported_at: new Date().toISOString(),
+    tables,
+  };
 }
 
 /** 파일 모양을 본다 — 지우기 전에(표가 빠진 파일로 지금 보드를 비우지 않게). */
@@ -63,7 +99,11 @@ export async function importData(q: Queryable, raw: unknown, userId: string): Pr
   const data = checkSyncData(raw, await lastMigration(q));
   // 지우기: 가리키는 쪽부터. 올린 파일 기록은 표를 잃어도 되게 끊는다.
   await q.query('update uploads set table_id = null where user_id = $1', [userId]);
-  for (const name of [...SYNC_TABLES].reverse()) if (name !== 'users') await q.query(`delete from ${name} where user_id = $1`, [userId]);
+  for (const name of [...SYNC_TABLES].reverse()) {
+    if (name === 'users') continue;
+    // 서버의 /s/ 공유 링크는 가져오기로 지우지 않는다(파일에 없으므로)
+    await q.query(name === 'shares' ? `delete from shares where user_id = $1 and external_id is not null` : `delete from ${name} where user_id = $1`, [userId]);
+  }
 
   // 사용자 설정 몇 칸
   const u = data.tables.users[0];
@@ -81,10 +121,11 @@ export async function importData(q: Queryable, raw: unknown, userId: string): Pr
       return row;
     });
     if (rows.length === 0) continue;
-    const info = await q.query<{ column_name: string; is_identity: string; is_generated: string }>(
-      "select column_name, is_identity, is_generated from information_schema.columns where table_schema = 'public' and table_name = $1",
-      [name],
-    );
+    const info = await q.query<{
+      column_name: string;
+      is_identity: string;
+      is_generated: string;
+    }>("select column_name, is_identity, is_generated from information_schema.columns where table_schema = 'public' and table_name = $1", [name]);
     // 계산되는 칸·자동 번호 칸(행 순서 position 등)은 넣지 않는다 — 번호는 DB 가 새로 매기고, 줄은 파일의 번호 순서대로 넣어 순서를 지킨다.
     // (번호표를 손으로 맞추면 가져오기가 실패해도 되돌아가지 않는다 — 코덱스 검토)
     const identity = info.filter((c) => c.is_identity === 'YES').map((c) => c.column_name);

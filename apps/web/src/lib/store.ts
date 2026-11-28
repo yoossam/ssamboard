@@ -19,9 +19,10 @@ export type Panel =
   | { kind: 'block-edit'; blockId: string }
   | { kind: 'share'; blockId: string }
   | { kind: 'task'; taskId?: string }
-  | { kind: 'event'; eventId?: string };
+  | { kind: 'event'; eventId?: string }
+  | { kind: 'results' };
 
-export type SettingsTab = 'general' | 'menu' | 'security' | 'connect' | 'devices' | 'drive' | 'data';
+export type SettingsTab = 'general' | 'menu' | 'memory' | 'security' | 'connect' | 'devices' | 'drive' | 'data';
 export type AiLayout = 'modal' | 'panel';
 
 export interface Toast {
@@ -41,10 +42,18 @@ interface AppState {
   aiOpen: boolean;
   aiLayout: AiLayout;
   /** AI 창을 열면서 바로 보낼 말. data 는 요청이 아니라 자료로 붙는다(믿을 수 없는 글은 여기에 싣는다). */
-  aiDraft: { text: string; data?: string; images?: AttachedImage[]; files?: AttachedFile[]; links?: AttachedLink[] } | null;
+  aiDraft: {
+    text: string;
+    data?: string;
+    images?: AttachedImage[];
+    files?: AttachedFile[];
+    links?: AttachedLink[];
+  } | null;
   editMode: boolean;
   /** AI에 컨텍스트로 줄 블록(ONE-7). */
   selected: string[];
+  /** 방금 바뀐 블록 — 잠깐 강조한다(승인 뒤 바뀐 곳 보기, 2026-11-28 UX 토론 J) */
+  highlight: string[];
   toasts: Toast[];
 
   setStatus: (status: AuthStatus | null) => void;
@@ -57,11 +66,18 @@ interface AppState {
   closeAll: () => void;
   openAi: (draft?: string, data?: string, images?: AttachedImage[], files?: AttachedFile[], links?: AttachedLink[]) => void;
   closeAi: () => void;
-  takeDraft: () => { text: string; data?: string; images?: AttachedImage[]; files?: AttachedFile[]; links?: AttachedLink[] } | null;
+  takeDraft: () => {
+    text: string;
+    data?: string;
+    images?: AttachedImage[];
+    files?: AttachedFile[];
+    links?: AttachedLink[];
+  } | null;
   setAiLayout: (layout: AiLayout) => void;
   setEditMode: (on: boolean) => void;
   toggleSelected: (blockId: string) => void;
   clearSelected: () => void;
+  flash: (blockIds: string[]) => void;
   toast: (text: string, tone?: Toast['tone']) => void;
   dropToast: (id: number) => void;
 }
@@ -75,6 +91,7 @@ function savedLayout(): AiLayout {
 }
 
 let toastSeq = 0;
+let flashTimer: ReturnType<typeof setTimeout> | undefined;
 
 export const useApp = create<AppState>()((set, get) => ({
   status: null,
@@ -86,6 +103,7 @@ export const useApp = create<AppState>()((set, get) => ({
   aiDraft: null,
   editMode: false,
   selected: [],
+  highlight: [],
   toasts: [],
 
   setStatus: (status) => set(status?.authenticated && !status.locked ? { status, lockReason: null } : { status }),
@@ -93,14 +111,36 @@ export const useApp = create<AppState>()((set, get) => ({
   // 잠기면 열려 있던 창과 선택을 모두 닫는다. 잠금 화면 뒤에 내용이 남지 않게 한다.
   markLocked: (reason) => {
     const s = get().status;
-    if (s?.authenticated && !s.locked) set({ status: { ...s, locked: true, seconds_left: 0 }, lockReason: reason ?? null, panels: [], aiOpen: false, editMode: false, selected: [] });
+    if (s?.authenticated && !s.locked)
+      set({
+        status: { ...s, locked: true, seconds_left: 0 },
+        lockReason: reason ?? null,
+        panels: [],
+        aiOpen: false,
+        aiDraft: null,
+        editMode: false,
+        selected: [],
+      });
   },
-  markSignedOut: () => set({ status: { authenticated: false }, panels: [], aiOpen: false, editMode: false, selected: [] }),
+  markSignedOut: () =>
+    set({
+      status: { authenticated: false },
+      panels: [],
+      aiOpen: false,
+      aiDraft: null,
+      editMode: false,
+      selected: [],
+    }),
   open: (panel) => set((s) => ({ panels: [...s.panels, panel] })),
   replace: (panel) => set((s) => ({ panels: [...s.panels.slice(0, -1), panel] })),
   close: () => set((s) => ({ panels: s.panels.slice(0, -1) })),
   closeAll: () => set({ panels: [] }),
-  openAi: (draft, data, images, files, links) => set({ aiOpen: true, aiDraft: draft || images?.length || files?.length || links?.length ? { text: draft ?? '', data, images, files, links } : null, panels: [] }),
+  openAi: (draft, data, images, files, links) =>
+    set({
+      aiOpen: true,
+      aiDraft: draft || images?.length || files?.length || links?.length ? { text: draft ?? '', data, images, files, links } : null,
+      panels: [],
+    }),
   closeAi: () => set({ aiOpen: false, aiDraft: null }),
   takeDraft: () => {
     const draft = get().aiDraft;
@@ -116,8 +156,16 @@ export const useApp = create<AppState>()((set, get) => ({
     set({ aiLayout });
   },
   setEditMode: (editMode) => set({ editMode }),
-  toggleSelected: (blockId) => set((s) => ({ selected: s.selected.includes(blockId) ? s.selected.filter((id) => id !== blockId) : [...s.selected, blockId].slice(-5) })),
+  toggleSelected: (blockId) =>
+    set((s) => ({
+      selected: s.selected.includes(blockId) ? s.selected.filter((id) => id !== blockId) : [...s.selected, blockId].slice(-5),
+    })),
   clearSelected: () => set({ selected: [] }),
+  flash: (highlight) => {
+    set({ highlight });
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => set({ highlight: [] }), 4000);
+  },
   toast: (text, tone = 'ok') => {
     const id = ++toastSeq;
     set((s) => ({ toasts: [...s.toasts.slice(-2), { id, text, tone }] }));

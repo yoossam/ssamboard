@@ -1,13 +1,37 @@
 import { useState, type ReactNode, type CSSProperties } from 'react';
-import { BLOCK_LABEL, BLOCK_TYPES, memoColor, SHAREABLE_BLOCKS, TRASH_DAYS, type BlockDto, type BlockType, type EventDto, type NotificationDto, type TaskDto, type TrashItem } from '@jarvis/shared';
-import { useAi } from '../ai/AiWindow';
+import { ResultsPanel } from './Results';
+import {
+  BLOCK_LABEL,
+  BLOCK_TYPES,
+  EVENT_DAYS,
+  EVENT_DAYS_LABEL,
+  eventDaysOf,
+  memoColor,
+  NOTI_SHOW_LABEL,
+  NOTI_SHOWS,
+  notiShowOf,
+  SHAREABLE_BLOCKS,
+  TASK_FILTER_LABEL,
+  TASK_FILTERS,
+  taskFilterOf,
+  TRASH_DAYS,
+  type NotiShow,
+  type TaskFilter,
+  type BlockDto,
+  type BlockType,
+  type EventDto,
+  type NotificationDto,
+  type TaskDto,
+  type TrashItem,
+} from '@jarvis/shared';
+import { forgetLastConversation, useAi } from '../ai/AiWindow';
 import { SharePanel } from './Share';
 import { BlockBody, PriorityTag, readAll } from '../board/blocks';
 import { togglePin } from '../board/Board';
 import { MemoColorDots } from '../board/memo';
 import { BLOCK_ICON, Icon } from '../components/Icon';
 import { Button, ButtonRow, CountBadge, Empty, Field, IconButton, inputClass, Sheet, Tag, useIsPhone } from '../components/ui';
-import { api, errorMessage } from '../lib/api';
+import { api, errorMessage, ApiError } from '../lib/api';
 import { LOCAL_TRACK, localHandle } from '../lib/edition';
 import { queryClient, refresh, useBoard, useEvents, useNotifications, useTables, useTasks, useTrash } from '../lib/data';
 import { ago, isoToLocalInput, localInputToIso } from '../lib/format';
@@ -20,7 +44,11 @@ import { SheetPanel, TablePanel, TablesPanel, UploadPanel } from './Tables';
 /** 큰 단추 타일. 한 줄에 두 개씩 놓는다. */
 function Tile({ icon, label, onClick, badge, tone }: { icon: string; label: string; onClick: () => void; badge?: ReactNode; tone?: 'danger' }) {
   return (
-    <button type="button" onClick={onClick} className={`flex h-14 min-w-0 items-center gap-2.5 rounded-[10px] border px-3 text-left text-sm font-medium hover:bg-ground ${tone === 'danger' ? 'text-danger' : ''}`}>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex h-14 min-w-0 items-center gap-2.5 rounded-[10px] border px-3 text-left text-sm font-medium hover:bg-ground ${tone === 'danger' ? 'text-danger' : ''}`}
+    >
       <Icon name={icon} className={tone === 'danger' ? '' : 'text-accent'} />
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {badge}
@@ -60,7 +88,15 @@ function MorePanel() {
   const email = useApp((s) => s.status?.user?.email ?? '');
   const phone = useIsPhone();
   const lock = async () => {
-    await api.post('/auth/lock').catch(() => undefined);
+    // 서버가 잠그지 못했는데 화면만 잠긴 척하지 않는다(공용 PC — 제미나이 검토). 이미 잠긴(423)·끝난(401) 세션은 그대로 잠금 화면으로.
+    try {
+      await api.post('/auth/lock');
+    } catch (e) {
+      if (!(e instanceof ApiError && (e.status === 423 || e.status === 401))) {
+        useApp.getState().toast(`잠그지 못했습니다: ${errorMessage(e)}`, 'error');
+        return;
+      }
+    }
     queryClient.clear();
     useAi.getState().reset();
     markLocked('manual');
@@ -72,9 +108,17 @@ function MorePanel() {
       await local.signOut().catch((e: Error) => useApp.getState().toast(e.message, 'error'));
       return;
     }
-    await api.post('/auth/logout').catch(() => undefined);
+    try {
+      await api.post('/auth/logout');
+    } catch (e) {
+      if (!(e instanceof ApiError && e.status === 401)) {
+        useApp.getState().toast(`로그아웃하지 못했습니다: ${errorMessage(e)}`, 'error');
+        return;
+      }
+    }
     queryClient.clear();
     useAi.getState().reset();
+    forgetLastConversation();
     markSignedOut();
   };
   return (
@@ -82,7 +126,7 @@ function MorePanel() {
       <div className="grid grid-cols-2 gap-2">
         <Tile icon="plus" label="블록 추가" onClick={() => replace({ kind: 'add-block' })} />
         {phone ? (
-          <Tile icon="drag" label="순서: 길게 눌러 끌기" onClick={close} />
+          <Tile icon="drag" label="순서: 머리줄 길게 눌러 끌기" onClick={close} />
         ) : (
           <Tile
             icon="grid"
@@ -148,7 +192,8 @@ function useBlock(id: string): BlockDto | undefined {
 function BlockPanel({ blockId }: { blockId: string }) {
   const { close, replace } = useApp.getState();
   const block = useBlock(blockId);
-  if (!block) return null;
+  // 보는 사이 블록이 지워지면 닫을 수 있게(빈 화면에 갇히지 않게 — 제미나이 검토)
+  if (!block) return <Missing what="블록" />;
   return (
     <Sheet
       title={block.title}
@@ -186,13 +231,23 @@ function BlockEditPanel({ blockId }: { blockId: string }) {
   const block = useBlock(blockId);
   const [title, setTitle] = useState(block?.title ?? '');
   const [color, setColor] = useState(memoColor(block?.config.color));
+  // 할 일·일정·알림 블록의 보여 줄 내용(@jarvis/shared blockview.ts)
+  const [taskFilter, setTaskFilter] = useState<TaskFilter>(taskFilterOf(block?.config));
+  const [eventDays, setEventDays] = useState<number>(eventDaysOf(block?.config));
+  const [notiShow, setNotiShow] = useState<NotiShow>(notiShowOf(block?.config));
   const [busy, setBusy] = useState(false);
-  if (!block) return null;
+  if (!block) return <Missing what="블록" />;
   const isMemo = block.type === 'memo';
+  const viewConfig =
+    block.type === 'tasks' ? { task_filter: taskFilter } : block.type === 'events' ? { event_days: eventDays } : block.type === 'notifications' ? { noti_show: notiShow } : isMemo ? { color } : null;
   const run = async (action: 'save' | 'delete') => {
     setBusy(true);
     try {
-      if (action === 'save') await api.patch(`/blocks/${block.id}`, { title: title.trim() || block.title, ...(isMemo ? { config: { color } } : {}) });
+      if (action === 'save')
+        await api.patch(`/blocks/${block.id}`, {
+          title: title.trim() || block.title,
+          ...(viewConfig ? { config: viewConfig } : {}),
+        });
       else await api.del(`/blocks/${block.id}`);
       await refresh('board', 'trash');
       toast(action === 'save' ? '저장했습니다' : '휴지통으로 보냈습니다');
@@ -229,6 +284,46 @@ function BlockEditPanel({ blockId }: { blockId: string }) {
           <MemoColorDots value={color} onPick={setColor} />
         </div>
       )}
+      {block.type === 'tasks' && (
+        <div className="mt-4">
+          <Field label="보여 줄 할 일">
+            <select className={inputClass} value={taskFilter} onChange={(e) => setTaskFilter(e.target.value as TaskFilter)}>
+              {TASK_FILTERS.map((f) => (
+                <option key={f} value={f}>
+                  {TASK_FILTER_LABEL[f]}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+      )}
+      {block.type === 'events' && (
+        <div className="mt-4">
+          <Field label="보여 줄 기간(오늘부터)">
+            <select className={inputClass} value={eventDays} onChange={(e) => setEventDays(Number(e.target.value))}>
+              {EVENT_DAYS.map((d) => (
+                <option key={d} value={d}>
+                  {EVENT_DAYS_LABEL[d]}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+      )}
+      {block.type === 'notifications' && (
+        <div className="mt-4">
+          <Field label="보여 줄 알림">
+            <select className={inputClass} value={notiShow} onChange={(e) => setNotiShow(e.target.value as NotiShow)}>
+              {NOTI_SHOWS.map((n) => (
+                <option key={n} value={n}>
+                  {NOTI_SHOW_LABEL[n]}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+      )}
+      <p className="mt-4 text-xs text-sub">지운 블록은 오른쪽 위 더보기(⋯) → 블록 추가로 다시 놓을 수 있습니다.</p>
     </Sheet>
   );
 }
@@ -241,7 +336,7 @@ function ItemPanel({ kind, item }: { kind: 'task' | 'event'; item?: TaskDto | Ev
   const [title, setTitle] = useState(item?.title ?? '');
   const [when, setWhen] = useState(isoToLocalInput(item ? (isTask ? (item as TaskDto).due_at : (item as EventDto).start_at) : null));
   const [end, setEnd] = useState(isoToLocalInput(!isTask && item ? (item as EventDto).end_at : null));
-  const [note, setNote] = useState(isTask && item ? (item as TaskDto).note ?? '' : '');
+  const [note, setNote] = useState(isTask && item ? ((item as TaskDto).note ?? '') : '');
   const [busy, setBusy] = useState(false);
   const path = isTask ? '/tasks' : '/events';
   const name = isTask ? '할 일' : '일정';
@@ -249,7 +344,18 @@ function ItemPanel({ kind, item }: { kind: 'task' | 'event'; item?: TaskDto | Ev
   const save = async () => {
     if (!title.trim()) return toast('제목을 입력하세요', 'error');
     if (!isTask && !when) return toast('시작 시각을 입력하세요', 'error');
-    const body = isTask ? { title: title.trim(), due_at: localInputToIso(when), ...(item ? { note } : {}) } : { title: title.trim(), start_at: localInputToIso(when), end_at: localInputToIso(end) };
+    if (!isTask && end && when && end < when) return toast('끝 시각이 시작보다 앞섭니다', 'error');
+    const body = isTask
+      ? {
+          title: title.trim(),
+          due_at: localInputToIso(when),
+          ...(item ? { note } : {}),
+        }
+      : {
+          title: title.trim(),
+          start_at: localInputToIso(when),
+          end_at: localInputToIso(end),
+        };
     setBusy(true);
     try {
       if (item) await api.patch(`${path}/${item.id}`, body);
@@ -331,15 +437,28 @@ function ItemPanel({ kind, item }: { kind: 'task' | 'event'; item?: TaskDto | Ev
   );
 }
 
+/** 고치려는 항목을 못 찾으면(오류·지워짐·범위 밖) '추가' 창으로 열지 않는다 — 저장하면 같은 것이 하나 더 생긴다(제미나이 검토) */
+function Missing({ what }: { what: string }) {
+  const close = useApp((s) => s.close);
+  return (
+    <Sheet title={what} onClose={close}>
+      <Empty>{what}을 찾을 수 없습니다. 지워졌거나 불러오지 못했습니다.</Empty>
+    </Sheet>
+  );
+}
 function TaskPanel({ taskId }: { taskId?: string }) {
   const { data, isLoading } = useTasks();
   if (taskId && isLoading) return null;
-  return <ItemPanel kind="task" item={data?.find((t) => t.id === taskId)} />;
+  const item = data?.find((t) => t.id === taskId);
+  if (taskId && !item) return <Missing what="할 일" />;
+  return <ItemPanel kind="task" item={item} />;
 }
 function EventPanel({ eventId }: { eventId?: string }) {
   const { data, isLoading } = useEvents();
   if (eventId && isLoading) return null;
-  return <ItemPanel kind="event" item={data?.find((e) => e.id === eventId)} />;
+  const item = data?.find((e) => e.id === eventId);
+  if (eventId && !item) return <Missing what="일정" />;
+  return <ItemPanel kind="event" item={item} />;
 }
 
 // ── 알림 센터 ─────────────────────────────────────────────────
@@ -357,11 +476,12 @@ function NotificationCard({ n }: { n: NotificationDto }) {
   const toTask = async () => {
     try {
       await api.post('/tasks', { title: n.title.slice(0, 200) });
-      await api.patch(`/notifications/${n.id}`, { status: 'read' });
-      await refresh('tasks', 'notifications');
       toast('할 일로 만들었습니다');
+      await api.patch(`/notifications/${n.id}`, { status: 'read' }).catch(() => undefined);
     } catch (e) {
       fail(e);
+    } finally {
+      await refresh('tasks', 'notifications');
     }
   };
   const unread = n.status === 'unread';
@@ -420,7 +540,13 @@ function NotificationsPanel() {
 
 // ── 휴지통 ───────────────────────────────────────────────────
 
-const KIND_LABEL: Record<TrashItem['kind'], string> = { blocks: '블록', data_tables: '표', data_rows: '행', tasks: '할 일', events: '일정' };
+const KIND_LABEL: Record<TrashItem['kind'], string> = {
+  blocks: '블록',
+  data_tables: '표',
+  data_rows: '행',
+  tasks: '할 일',
+  events: '일정',
+};
 
 function TrashPanel() {
   const { close, toast } = useApp.getState();
@@ -489,6 +615,8 @@ function PanelView({ panel }: { panel: Panel }) {
       return <SheetPanel connectorId={panel.connectorId} />;
     case 'settings':
       return <SettingsPanel initialTab={panel.tab} />;
+    case 'results':
+      return <ResultsPanel />;
     default:
       return null;
   }
@@ -499,5 +627,20 @@ export function PanelHost() {
   const panels = useApp((s) => s.panels);
   const top = panels[panels.length - 1];
   if (!top) return null;
-  return <PanelView key={`${panels.length}:${top.kind}:${'blockId' in top ? top.blockId : 'tableId' in top ? top.tableId : ''}`} panel={top} />;
+  // 같은 종류 창을 다른 항목으로 바꿔 열면 새로 그린다(이전 항목의 입력값이 남지 않게 — 제미나이 검토)
+  const id =
+    'blockId' in top
+      ? top.blockId
+      : 'tableId' in top
+        ? top.tableId
+        : 'taskId' in top
+          ? top.taskId
+          : 'eventId' in top
+            ? top.eventId
+            : 'connectorId' in top
+              ? top.connectorId
+              : 'tab' in top
+                ? top.tab
+                : '';
+  return <PanelView key={`${panels.length}:${top.kind}:${id ?? ''}`} panel={top} />;
 }

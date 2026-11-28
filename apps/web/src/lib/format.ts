@@ -20,13 +20,23 @@ export function timeLabel(d: Date | string): string {
 }
 /** "11.25 15:00" — 좁은 칸에 넣는 짧은 꼴 */
 export function shortWhen(d: Date | string): string {
-  const parts = fmt({ month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(d));
+  const parts = fmt({
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date(d));
   const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
   return `${get('month')}.${get('day')} ${get('hour')}:${get('minute')}`;
 }
 /** 그 시각이 사용자 시간대로 며칠인지 "2026-11-25" */
 export function dayKey(d: Date | string): string {
-  const parts = fmt({ year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(d));
+  const parts = fmt({
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(d));
   const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
   return `${get('year')}-${get('month')}-${get('day')}`;
 }
@@ -48,13 +58,20 @@ export function ago(iso: string): string {
 
 /** 사용자 시간대의 UTC 오프셋 "+09:00". 입력한 날짜·시각을 ISO로 바꿀 때 쓴다. */
 export function zoneOffset(at = new Date()): string {
-  const name = new Intl.DateTimeFormat('en-US', { timeZone: zone, timeZoneName: 'longOffset' }).format(at);
+  const name = new Intl.DateTimeFormat('en-US', {
+    timeZone: zone,
+    timeZoneName: 'longOffset',
+  }).format(at);
   return name.split('GMT')[1] || '+00:00';
 }
 /** <input type="datetime-local"> 값 → ISO(UTC) */
 export function localInputToIso(value: string): string | null {
   if (!value) return null;
-  const d = new Date(`${value.length === 16 ? `${value}:00` : value}${zoneOffset(new Date(`${value}Z`))}`);
+  const base = value.length === 16 ? `${value}:00` : value;
+  // 서머타임 바뀌는 날도 맞게: 한 번 맞춘 시각의 오프셋으로 다시 맞춘다(제미나이 검토)
+  const first = new Date(`${base}${zoneOffset(new Date(`${base}Z`))}`);
+  if (Number.isNaN(first.getTime())) return null;
+  const d = new Date(`${base}${zoneOffset(first)}`);
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 /** ISO → <input type="datetime-local"> 값(사용자 시간대) */

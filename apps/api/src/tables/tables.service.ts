@@ -34,10 +34,7 @@ export interface NewTable {
 }
 
 export type SchemaOp =
-  | { op: 'add'; name: string; type: ColumnType }
-  | { op: 'rename'; col_id: string; name: string }
-  | { op: 'delete'; col_id: string }
-  | { op: 'retype'; col_id: string; type: ColumnType };
+  { op: 'add'; name: string; type: ColumnType } | { op: 'rename'; col_id: string; name: string } | { op: 'delete'; col_id: string } | { op: 'retype'; col_id: string; type: ColumnType };
 
 const TABLE_SELECT = `select t.id, t.name, t.schema, t.origin, t.llm_excluded, t.last_synced_at, t.last_error,
   (t.connector_id is not null and t.sheet_ref is not null) as linked,
@@ -48,7 +45,12 @@ const TABLE_SELECT = `select t.id, t.name, t.schema, t.origin, t.llm_excluded, t
     'public_link', coalesce((t.sheet_ref->>'public_link')::boolean, false)) end as form,
   (select count(*) from data_rows r where r.table_id = t.id and r.deleted_at is null)::int as row_count
   from data_tables t`;
-const CAST: Partial<Record<ColumnType, string>> = { number: 'numeric', date: 'date', datetime: 'timestamptz', boolean: 'boolean' };
+const CAST: Partial<Record<ColumnType, string>> = {
+  number: 'numeric',
+  date: 'date',
+  datetime: 'timestamptz',
+  boolean: 'boolean',
+};
 const CHUNK = 1000;
 
 export function checkColumnDefs(defs: unknown): { name: string; type: ColumnType }[] {
@@ -57,7 +59,10 @@ export function checkColumnDefs(defs: unknown): { name: string; type: ColumnType
   if (list.length > MAX_COLUMNS) bad(`컬럼은 최대 ${MAX_COLUMNS}개입니다.`);
   return list.map((d, i) => {
     if (!d || !COLUMN_TYPES.includes(d.type)) bad(`${i + 1}번째 컬럼의 타입이 허용 목록에 없습니다.`);
-    return { name: String(d.name ?? '').slice(0, 60), type: d.type as ColumnType };
+    return {
+      name: String(d.name ?? '').slice(0, 60),
+      type: d.type as ColumnType,
+    };
   });
 }
 
@@ -92,15 +97,7 @@ export class TablesService {
     return { table: (await this.get(userId, row.id, q))!, failures };
   }
 
-  async insertRows(
-    q: Queryable,
-    userId: string,
-    tableId: string,
-    columns: Column[],
-    rawRows: unknown[][],
-    sourceIndex?: number[],
-    commandId: string | null = null,
-  ): Promise<Record<string, number>> {
+  async insertRows(q: Queryable, userId: string, tableId: string, columns: Column[], rawRows: unknown[][], sourceIndex?: number[], commandId: string | null = null): Promise<Record<string, number>> {
     const failures: Record<string, number> = {};
     for (let i = 0; i < rawRows.length; i += CHUNK) {
       const result = normalizeRows(columns, rawRows.slice(i, i + CHUNK), sourceIndex);
@@ -128,14 +125,19 @@ export class TablesService {
     const sortCol = opts.sort ? findColumn(table.schema, opts.sort) : undefined;
     if (sortCol) {
       params.push(sortCol.id);
-      const expr = `(r.data->>($5::text))${CAST[sortCol.type] ? `::${CAST[sortCol.type]}` : ''}`;
+      const expr = CAST[sortCol.type] ? `nullif(r.data->>($5::text), '')::${CAST[sortCol.type]}` : `(r.data->>($5::text))`;
       order = `${expr} ${opts.dir === 'desc' ? 'desc' : 'asc'} nulls last, r.position asc`;
     }
     const rows = await this.db.query<RowDto & { data: RowDto['values'] }>(
       `select r.id, r.data, r.raw from data_rows r where r.table_id = $1 and r.user_id = $2 and r.deleted_at is null order by ${order} limit $3 offset $4`,
       params,
     );
-    return { rows: rows.map((r) => ({ id: r.id, values: r.data, raw: r.raw })), total: table.row_count, page: opts.page, size: opts.size };
+    return {
+      rows: rows.map((r) => ({ id: r.id, values: r.data, raw: r.raw })),
+      total: table.row_count,
+      page: opts.page,
+      size: opts.size,
+    };
   }
 
   /** 컬럼 ID → 입력값 묶음을 타입에 맞춰 바꾼다. 맞지 않는 값이 있으면 400. */
@@ -154,6 +156,15 @@ export class TablesService {
 
   private writable(table: TableDto): void {
     if (table.linked) bad('연결된 표는 읽기 전용입니다. 원본 시트에서 고친 뒤 새로고침하세요.');
+  }
+
+  /** 많은 줄을 1,000줄씩 한 트랜잭션으로 */
+  async addRowsAll(userId: string, tableId: string, rows: Record<string, unknown>[]): Promise<number> {
+    return this.db.tx(async (q) => {
+      let added = 0;
+      for (let i = 0; i < rows.length; i += 1000) added += await this.addRows(userId, tableId, rows.slice(i, i + 1000), q);
+      return added;
+    });
   }
 
   async addRows(userId: string, tableId: string, inputs: Record<string, unknown>[], q: Queryable = this.db, commandId: string | null = null): Promise<number> {
@@ -176,7 +187,11 @@ export class TablesService {
     this.writable(table);
     const values = this.normalizeRecord(table.schema, input, true);
     const keys = Object.keys(values);
-    const row = await this.db.one<{ id: string; data: RowDto['values']; raw: RowDto['raw'] }>(
+    const row = await this.db.one<{
+      id: string;
+      data: RowDto['values'];
+      raw: RowDto['raw'];
+    }>(
       `update data_rows set data = data || $4::jsonb, raw = nullif(coalesce(raw, '{}'::jsonb) - $5::text[], '{}'::jsonb), updated_at = now()
         where id = $1 and table_id = $2 and user_id = $3 and deleted_at is null returning id, data, raw`,
       [rowId, tableId, userId, json(values), keys],
@@ -186,10 +201,11 @@ export class TablesService {
 
   async deleteRow(userId: string, tableId: string, rowId: string): Promise<boolean> {
     this.writable(await this.require(userId, tableId));
-    const rows = await this.db.query(
-      'update data_rows set deleted_at = now(), updated_at = now() where id = $1 and table_id = $2 and user_id = $3 and deleted_at is null returning id',
-      [rowId, tableId, userId],
-    );
+    const rows = await this.db.query('update data_rows set deleted_at = now(), updated_at = now() where id = $1 and table_id = $2 and user_id = $3 and deleted_at is null returning id', [
+      rowId,
+      tableId,
+      userId,
+    ]);
     return rows.length > 0;
   }
 
@@ -223,17 +239,20 @@ export class TablesService {
           if (columns.length >= MAX_COLUMNS) bad(`컬럼은 최대 ${MAX_COLUMNS}개입니다.`);
           columns.push(...buildColumns(checkColumnDefs([op]), columns));
         } else if (op.op === 'rename') {
-          const name = String(op.name ?? '').trim().slice(0, 60);
+          const name = String(op.name ?? '')
+            .trim()
+            .slice(0, 60);
           if (!name) bad('컬럼 이름이 비어 있습니다.');
           if (columns.some((c) => c.name === name && c.id !== op.col_id)) bad(`같은 이름의 컬럼이 있습니다: ${name}`);
           columns[at(op.col_id)] = { ...columns[at(op.col_id)], name };
         } else if (op.op === 'delete') {
           if (columns.length <= 1) bad('컬럼은 하나 이상 남아야 합니다.');
           columns.splice(at(op.col_id), 1);
-          await q.query(
-            `update data_rows set data = data - $3::text, raw = nullif(coalesce(raw, '{}'::jsonb) - $3::text, '{}'::jsonb), updated_at = now() where table_id = $1 and user_id = $2`,
-            [id, userId, op.col_id],
-          );
+          await q.query(`update data_rows set data = data - $3::text, raw = nullif(coalesce(raw, '{}'::jsonb) - $3::text, '{}'::jsonb), updated_at = now() where table_id = $1 and user_id = $2`, [
+            id,
+            userId,
+            op.col_id,
+          ]);
         } else if (op.op === 'retype') {
           if (!COLUMN_TYPES.includes(op.type)) bad('타입이 허용 목록에 없습니다.');
           const i = at(op.col_id);
@@ -250,8 +269,13 @@ export class TablesService {
 
   /** 타입을 바꾸면 기존 값(실패했던 셀은 원문)을 새 타입으로 다시 변환한다. */
   private async retype(q: Queryable, userId: string, tableId: string, colId: string, type: ColumnType): Promise<void> {
-    for (let after = 0; ; ) {
-      const batch = await q.query<{ id: string; position: string; value: string | null; raw: string | null }>(
+    for (let after = 0; ;) {
+      const batch = await q.query<{
+        id: string;
+        position: string;
+        value: string | null;
+        raw: string | null;
+      }>(
         `select id, position, data->>($3::text) as value, raw->>($3::text) as raw from data_rows
           where table_id = $1 and user_id = $2 and position > $4 order by position limit ${CHUNK}`,
         [tableId, userId, colId, after],

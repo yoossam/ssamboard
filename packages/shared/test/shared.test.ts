@@ -64,12 +64,27 @@ describe('숫자·날짜 변환 (LLM-11)', () => {
     assert.equal(parseDateTime('2026-11-26 25:00'), null);
   });
   it('타입별로 값을 정규화한다', () => {
-    assert.deepEqual(normalizeValue(' 예 ', 'boolean'), { ok: true, value: true });
-    assert.deepEqual(normalizeValue('X', 'boolean'), { ok: true, value: false });
+    assert.deepEqual(normalizeValue(' 예 ', 'boolean'), {
+      ok: true,
+      value: true,
+    });
+    assert.deepEqual(normalizeValue('X', 'boolean'), {
+      ok: true,
+      value: false,
+    });
     assert.deepEqual(normalizeValue('', 'number'), { ok: true, value: null });
-    assert.deepEqual(normalizeValue('abc', 'number'), { ok: false, value: null });
-    assert.deepEqual(normalizeValue('https://example.com/a', 'url'), { ok: true, value: 'https://example.com/a' });
-    assert.deepEqual(normalizeValue('example.com', 'url'), { ok: false, value: null });
+    assert.deepEqual(normalizeValue('abc', 'number'), {
+      ok: false,
+      value: null,
+    });
+    assert.deepEqual(normalizeValue('https://example.com/a', 'url'), {
+      ok: true,
+      value: 'https://example.com/a',
+    });
+    assert.deepEqual(normalizeValue('example.com', 'url'), {
+      ok: false,
+      value: null,
+    });
     assert.deepEqual(normalizeValue(1200, 'number'), { ok: true, value: 1200 });
   });
 });
@@ -94,11 +109,21 @@ describe('컬럼 타입 추정과 행 변환 (LLM-3·12)', () => {
       { name: '금액', type: 'number' },
       { name: '', type: 'text' },
     ]);
-    assert.deepEqual(first.map((c) => c.id), ['c_1', 'c_2', 'c_3', 'c_4']);
-    assert.deepEqual(first.map((c) => c.name), ['거래처', '금액', '금액 2', '컬럼 4']);
-    assert.equal(nextColumnId(first), 'c_5');
+    assert.deepEqual(
+      first.map((c) => c.id),
+      ['c_1', 'c_2', 'c_3', 'c_4'],
+    );
+    assert.deepEqual(
+      first.map((c) => c.name),
+      ['거래처', '금액', '금액 2', '컬럼 4'],
+    );
+    assert.equal(nextColumnId(first, true), 'c_5');
+    // 있는 표에 더하는 열은 겹치지 않는 꼬리 — 지운 열 번호를 다시 쓰지 않는다(코덱스 검토)
     const added = buildColumns([{ name: '금액', type: 'number' }], first);
-    assert.deepEqual(added, [{ id: 'c_5', name: '금액 3', type: 'number' }]);
+    assert.match(added[0].id, /^c_5_[0-9a-z]{6}$/);
+    assert.equal(added[0].name, '금액 3');
+    const without = first.filter((c) => c.id !== 'c_4');
+    assert.notEqual(buildColumns([{ name: '새', type: 'text' }], without)[0].id, 'c_4');
   });
   it('변환에 실패한 셀은 값을 비우고 원문을 남긴다', () => {
     const cols = buildColumns([
@@ -109,8 +134,14 @@ describe('컬럼 타입 추정과 행 변환 (LLM-3·12)', () => {
       ['가나상사', '1,200,000원'],
       ['다라물산', '협의 중'],
     ]);
-    assert.deepEqual(r.rows[0], { values: { c_1: '가나상사', c_2: 1200000 }, raw: null });
-    assert.deepEqual(r.rows[1], { values: { c_1: '다라물산', c_2: null }, raw: { c_2: '협의 중' } });
+    assert.deepEqual(r.rows[0], {
+      values: { c_1: '가나상사', c_2: 1200000 },
+      raw: null,
+    });
+    assert.deepEqual(r.rows[1], {
+      values: { c_1: '다라물산', c_2: null },
+      raw: { c_2: '협의 중' },
+    });
     assert.deepEqual(r.failures, { c_2: 1 });
   });
   it('원본 열 순서를 바꿔 매핑할 수 있다', () => {
@@ -140,7 +171,10 @@ describe('CSV 파서', () => {
     ]);
   });
   it('머리글을 나누고 모자란 열을 채운다', () => {
-    const { header, body } = splitHeader([['거래처', '', '금액'], ['가나상사', '미수']]);
+    const { header, body } = splitHeader([
+      ['거래처', '', '금액'],
+      ['가나상사', '미수'],
+    ]);
     assert.deepEqual(header, ['거래처', '컬럼 2', '금액']);
     assert.deepEqual(body, [['가나상사', '미수', '']]);
   });
@@ -190,7 +224,10 @@ describe('조회·집계 규격 검증 (QRY-1·2·4)', () => {
     bad({ filter: [{ col_id: 'c_1', op: 'like', value: 'a' }] });
     bad({ group_by: [{ col_id: 'c_1', bucket: 'month' }] });
     bad({ agg: [{ col_id: 'c_1', fn: 'sum' }] });
-    bad({ group_by: [{ col_id: 'c_2' }], sort: [{ col_id: 'c_3', dir: 'asc' }] });
+    bad({
+      group_by: [{ col_id: 'c_2' }],
+      sort: [{ col_id: 'c_3', dir: 'asc' }],
+    });
     bad({ agg: [{ fn: 'count' }], sort: [{ agg: 3, dir: 'desc' }] });
     bad({ limit: 0 });
     bad('select * from data_rows');
@@ -218,14 +255,44 @@ describe('블록 배치', () => {
   ];
   it('처음 비는 칸에 놓는다', () => {
     assert.equal(GRID_COLS, 24);
-    assert.deepEqual(placeBlock(board, { w: 4, h: 4 }), { x: 8, y: 0, w: 4, h: 4 });
-    assert.deepEqual(placeBlock(board, { w: 16, h: 4 }), { x: 8, y: 0, w: 16, h: 4 });
-    assert.deepEqual(placeBlock(board, { w: 18, h: 4 }), { x: 0, y: 4, w: 18, h: 4 });
-    assert.deepEqual(placeBlock([], { w: 3, h: 4 }), { x: 0, y: 0, w: 3, h: 4 });
+    assert.deepEqual(placeBlock(board, { w: 4, h: 4 }), {
+      x: 8,
+      y: 0,
+      w: 4,
+      h: 4,
+    });
+    assert.deepEqual(placeBlock(board, { w: 16, h: 4 }), {
+      x: 8,
+      y: 0,
+      w: 16,
+      h: 4,
+    });
+    assert.deepEqual(placeBlock(board, { w: 18, h: 4 }), {
+      x: 0,
+      y: 4,
+      w: 18,
+      h: 4,
+    });
+    assert.deepEqual(placeBlock([], { w: 3, h: 4 }), {
+      x: 0,
+      y: 0,
+      w: 3,
+      h: 4,
+    });
   });
   it('힌트가 있으면 그 모서리에 놓는다', () => {
-    assert.deepEqual(placeBlock(board, { w: 3, h: 4 }, 'top-right'), { x: 21, y: 0, w: 3, h: 4 });
-    assert.deepEqual(placeBlock(board, { w: 3, h: 4 }, 'bottom-left'), { x: 0, y: 4, w: 3, h: 4 });
+    assert.deepEqual(placeBlock(board, { w: 3, h: 4 }, 'top-right'), {
+      x: 21,
+      y: 0,
+      w: 3,
+      h: 4,
+    });
+    assert.deepEqual(placeBlock(board, { w: 3, h: 4 }, 'bottom-left'), {
+      x: 0,
+      y: 4,
+      w: 3,
+      h: 4,
+    });
   });
   it('기본 크기와 최소 크기는 격자 안에 들고, 최소가 기본보다 크지 않다', () => {
     for (const type of BLOCK_TYPES) {
@@ -252,35 +319,87 @@ describe('블록 배치', () => {
       { id: 'c', layout_lg: { x: 0, y: 4, w: 4, h: 4 }, layout_sm: null },
       { id: 'a', layout_lg: { x: 0, y: 0, w: 4, h: 4 }, layout_sm: null },
     ];
-    assert.deepEqual(mobileOrder(blocks).map((b) => b.id), ['a', 'b', 'c']);
-    const custom = blocks.map((b, i) => ({ ...b, layout_sm: { order: 2 - i } }));
-    assert.deepEqual(mobileOrder(custom).map((b) => b.id), ['a', 'c', 'b']);
+    assert.deepEqual(
+      mobileOrder(blocks).map((b) => b.id),
+      ['a', 'b', 'c'],
+    );
+    const custom = blocks.map((b, i) => ({
+      ...b,
+      layout_sm: { order: 2 - i },
+    }));
+    assert.deepEqual(
+      mobileOrder(custom).map((b) => b.id),
+      ['a', 'c', 'b'],
+    );
   });
 });
 
 describe('AI 화면 블록의 자료 정의', () => {
-  const schema: TableSchema = { columns: [{ id: 'c_1', name: '항목', type: 'text' }, { id: 'c_2', name: '금액', type: 'number' }] };
+  const schema: TableSchema = {
+    columns: [
+      { id: 'c_1', name: '항목', type: 'text' },
+      { id: 'c_2', name: '금액', type: 'number' },
+    ],
+  };
   const TABLE = '11111111-2222-4333-8444-555555555555';
   const lookup = (id: string) => (id === TABLE ? schema : null);
 
   it('없으면 자료 없음, 할 일·일정은 그대로 받는다', () => {
-    assert.deepEqual(checkViewData(undefined, lookup), { ok: true, data: { kind: 'none' } });
-    assert.deepEqual(checkViewData({ kind: 'tasks' }, lookup), { ok: true, data: { kind: 'tasks' } });
-    assert.deepEqual(checkViewData({ kind: 'events' }, lookup), { ok: true, data: { kind: 'events', days_before: 0, days_after: 30 } });
-    assert.deepEqual(checkViewData({ kind: 'events', days_before: -3, days_after: 9999 }, lookup), { ok: true, data: { kind: 'events', days_before: 0, days_after: VIEW_EVENT_DAYS_MAX } });
+    assert.deepEqual(checkViewData(undefined, lookup), {
+      ok: true,
+      data: { kind: 'none' },
+    });
+    assert.deepEqual(checkViewData({ kind: 'tasks' }, lookup), {
+      ok: true,
+      data: { kind: 'tasks' },
+    });
+    assert.deepEqual(checkViewData({ kind: 'events' }, lookup), {
+      ok: true,
+      data: { kind: 'events', days_before: 0, days_after: 30 },
+    });
+    assert.deepEqual(checkViewData({ kind: 'events', days_before: -3, days_after: 9999 }, lookup), {
+      ok: true,
+      data: {
+        kind: 'events',
+        days_before: 0,
+        days_after: VIEW_EVENT_DAYS_MAX,
+      },
+    });
   });
   it('표 자료는 표가 있어야 하고 query를 검증한다', () => {
-    const good = checkViewData({ kind: 'table', table_id: TABLE, query: { group_by: [{ col_id: 'c_1' }], agg: [{ col_id: 'c_2', fn: 'sum' }] } }, lookup);
+    const good = checkViewData(
+      {
+        kind: 'table',
+        table_id: TABLE,
+        query: {
+          group_by: [{ col_id: 'c_1' }],
+          agg: [{ col_id: 'c_2', fn: 'sum' }],
+        },
+      },
+      lookup,
+    );
     assert.ok(good.ok && good.data.kind === 'table' && good.data.table_id === TABLE);
     assert.equal(checkViewData({ kind: 'table', table_id: 'nope' }, lookup).ok, false);
     assert.equal(checkViewData({ kind: 'table' }, lookup).ok, false);
-    assert.equal(checkViewData({ kind: 'table', table_id: TABLE, query: { agg: [{ col_id: 'c_9', fn: 'sum' }] } }, lookup).ok, false);
+    assert.equal(
+      checkViewData(
+        {
+          kind: 'table',
+          table_id: TABLE,
+          query: { agg: [{ col_id: 'c_9', fn: 'sum' }] },
+        },
+        lookup,
+      ).ok,
+      false,
+    );
     assert.equal(checkViewData({ kind: 'web', url: 'https://example.test' }, lookup).ok, false);
     assert.equal(checkViewData('tasks', lookup).ok, false);
   });
   it('저장된 값이 이상하면 자료 없음으로 읽는다', () => {
     assert.deepEqual(readViewData(null), { kind: 'none' });
-    assert.deepEqual(readViewData({ kind: 'table', table_id: 5 }), { kind: 'none' });
+    assert.deepEqual(readViewData({ kind: 'table', table_id: 5 }), {
+      kind: 'none',
+    });
     assert.deepEqual(readViewData({ kind: 'events', days_before: 7, days_after: 14 }), { kind: 'events', days_before: 7, days_after: 14 });
     assert.equal(readViewData({ kind: 'table', table_id: TABLE, query: { limit: 10 } }).kind, 'table');
   });

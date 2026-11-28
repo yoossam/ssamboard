@@ -195,9 +195,21 @@ export interface PlanStepView {
 }
 export interface CommandDto {
   id: string;
-  status: 'proposed' | 'applied' | 'undone' | 'cancelled';
+  /** applying = 반영했고 바깥 일(공유 링크)을 마저 하는 중 — 끝나면 applied */
+  status: 'proposed' | 'applying' | 'applied' | 'undone' | 'cancelled';
   steps: PlanStepView[];
   skipped?: string[];
+  /** 승인해서 만든 파일(AI 가 고친 엑셀·한글) — 내려받기. expires_at 이 지나면(하루) 지워진다 */
+  files?: { id: string; name: string; expires_at?: string | null; gone?: boolean }[];
+  /** 처리 결과함(2026-11-28 세 모델 UX 토론 A·J) */
+  created_at?: string;
+  applied_at?: string | null;
+  /** 바뀐 곳 — 화면이 이 항목을 보여 주는 블록을 찾아 강조한다 */
+  touched?: { entity: string; id: string }[];
+  /** 이 처리로 만든 공유 링크 */
+  shares?: { id: string; title: string; url: string; revoked: boolean }[];
+  /** 지금 되돌릴 수 있는지(가장 최근에 적용한 것만) */
+  undoable?: boolean;
 }
 
 export interface AuthStatus {
@@ -261,6 +273,8 @@ export interface TrashItem {
 export type AiStreamEvent =
   | { type: 'text'; delta: string }
   | { type: 'tool'; name: string; label: string }
+  /** AI 가 화면에서 창을 연다(open_screen) — 바꾸는 것이 없어 승인 없이 */
+  | { type: 'open'; target: string; id?: string }
   | { type: 'plan'; command: CommandDto }
   | { type: 'error'; message: string }
   | { type: 'done'; conversation_id: string };

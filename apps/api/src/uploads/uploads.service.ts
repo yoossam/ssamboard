@@ -1,3 +1,5 @@
+import JSZip from 'jszip';
+import { assertZipSmall } from '../files/zip-guard';
 import { Injectable } from '@nestjs/common';
 import { COLUMN_TYPES, inferColumnType, maskDeep, parseCsv, splitHeader, type ColumnType } from '@jarvis/shared';
 import ExcelJS from 'exceljs';
@@ -66,13 +68,19 @@ export async function parseFile(filename: string, buffer: Buffer): Promise<Parse
   const ext = extname(filename).toLowerCase();
   let rows: string[][];
   if (ext === '.xlsx') {
+    // 작게 압축된 거대한 파일(압축 폭탄)을 막게 실제로 풀리는 크기부터 센다(코덱스·제미나이 검토)
+    await assertZipSmall(await JSZip.loadAsync(buffer));
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(buffer as any);
     const sheet = workbook.worksheets[0];
     if (!sheet) bad('엑셀 파일에 시트가 없습니다.');
     rows = [];
     sheet.eachRow({ includeEmpty: false }, (row) => {
-      rows.push(Array.from(row.values as unknown[]).slice(1).map(cellText));
+      rows.push(
+        Array.from(row.values as unknown[])
+          .slice(1)
+          .map(cellText),
+      );
     });
   } else if (ext === '.csv' || ext === '.tsv' || ext === '.txt') {
     rows = parseCsv(decodeText(buffer));
@@ -93,7 +101,15 @@ export class UploadsService {
     private readonly tables: TablesService,
   ) {}
 
-  async save(userId: string, file: { originalname: string; buffer: Buffer; size: number; mimetype: string }): Promise<UploadPreview> {
+  async save(
+    userId: string,
+    file: {
+      originalname: string;
+      buffer: Buffer;
+      size: number;
+      mimetype: string;
+    },
+  ): Promise<UploadPreview> {
     // multer는 파일 이름을 latin1로 읽으므로 UTF-8로 되돌린다.
     const filename = Buffer.from(file.originalname, 'latin1').toString('utf8').slice(0, 200);
     const parsed = await parseFile(filename, file.buffer);
@@ -125,9 +141,18 @@ export class UploadsService {
 
   /** 저장해 둔 원본을 다시 파싱한다(표를 만들 때 모든 행을 넣기 위해). */
   async read(userId: string, id: string): Promise<ParsedUpload & { filename: string }> {
-    const row = await this.db.one<{ filename: string; storage_path: string }>('select filename, storage_path from uploads where id = $1 and user_id = $2', [id, userId]);
+    const row = await this.db.one<{ filename: string; storage_path: string }>('select filename, storage_path from uploads where id = $1 and user_id = $2 and kind = $3', [id, userId, 'table']);
     if (!row) notFound('업로드');
-    return { ...(await parseFile(row!.filename, await readFile(row!.storage_path))), filename: row!.filename };
+    let buffer: Buffer;
+    try {
+      buffer = await readFile(row!.storage_path);
+    } catch {
+      return bad('올린 파일이 지워졌습니다(하루가 지났거나 새로 고침). 다시 올려 주세요.');
+    }
+    return {
+      ...(await parseFile(row!.filename, buffer)),
+      filename: row!.filename,
+    };
   }
 
   async attach(userId: string, id: string, tableId: string): Promise<void> {
@@ -138,7 +163,13 @@ export class UploadsService {
   async suggest(user: UserRow, id: string): Promise<UploadSuggestion> {
     const parsed = await this.read(user.id, id);
     const ctx = await this.llm.context(user);
-    const existing = (await this.tables.list(user.id)).filter((t) => !t.llm_excluded).map((t) => ({ id: t.id, name: t.name, columns: t.schema.columns.map((c) => c.name) }));
+    const existing = (await this.tables.list(user.id))
+      .filter((t) => !t.llm_excluded)
+      .map((t) => ({
+        id: t.id,
+        name: t.name,
+        columns: t.schema.columns.map((c) => c.name),
+      }));
     const { data, usage } = await ctx.adapter.json<UploadSuggestion>({
       apiKey: ctx.apiKey,
       model: ctx.model,
@@ -155,7 +186,15 @@ export class UploadsService {
           table_name: { type: 'string' },
           columns: {
             type: 'array',
-            items: { type: 'object', properties: { name: { type: 'string' }, type: { type: 'string', enum: COLUMN_TYPES } }, required: ['name', 'type'], additionalProperties: false },
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string' },
+                type: { type: 'string', enum: COLUMN_TYPES },
+              },
+              required: ['name', 'type'],
+              additionalProperties: false,
+            },
           },
           similar_table_id: { anyOf: [{ type: 'string' }, { type: 'null' }] },
         },
@@ -170,8 +209,14 @@ export class UploadsService {
     return {
       table_name: String(data?.table_name ?? '').slice(0, 80) || parsed.filename.replace(/\.[^.]+$/, ''),
       columns: valid
-        ? data.columns.map((c, i) => ({ name: String(c.name ?? '').slice(0, 60) || parsed.header[i], type: c.type }))
-        : parsed.header.map((name, i) => ({ name, type: inferColumnType(sample.map((r) => r[i])) })),
+        ? data.columns.map((c, i) => ({
+            name: String(c.name ?? '').slice(0, 60) || parsed.header[i],
+            type: c.type,
+          }))
+        : parsed.header.map((name, i) => ({
+            name,
+            type: inferColumnType(sample.map((r) => r[i])),
+          })),
       similar_table_id: existing.some((t) => t.id === data?.similar_table_id) ? data.similar_table_id : null,
     };
   }

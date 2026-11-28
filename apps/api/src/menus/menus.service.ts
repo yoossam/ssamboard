@@ -244,28 +244,53 @@ export class MenusService {
 
   /** 고른 추천으로 메뉴를 만든다(필요한 새 표도). 한 트랜잭션. */
   async create(userId: string, drafts: unknown): Promise<MenuItemDto[]> {
+    return this.db.tx(async (q) => (await this.createIn(q, userId, drafts)).all);
+  }
+
+  /**
+   * 트랜잭션(q) 안에서 만든다 — AI 계획 승인(commands.service)도 이것을 쓴다. commandId 를 주면 새 표에 남긴다(되돌리기).
+   * 만든 메뉴 id 와 새 표 id 를 함께 돌려준다.
+   */
+  async createIn(q: Queryable, userId: string, drafts: unknown, commandId: string | null = null): Promise<{ all: MenuItemDto[]; made: MenuItemDto[]; tables: { id: string; name: string }[] }> {
     if (!Array.isArray(drafts) || drafts.length === 0) bad('만들 메뉴를 고르세요.');
-    return this.db.tx(async (q) => {
+    {
       const own = new Set((await q.query<{ id: string }>('select id from data_tables where user_id = $1 and deleted_at is null', [userId])).map((r) => r.id));
       const checked = (drafts as unknown[]).map((d) => checkDraft(d, own));
       const have = (await q.one<{ n: number; top: number }>('select count(*)::int as n, coalesce(max(position), -1)::int as top from menu_items where user_id = $1', [userId]))!;
       if (have.n + checked.length > MENU_MAX) bad(`메뉴는 ${MENU_MAX}개까지입니다. 지금 ${have.n}개가 있습니다.`);
-      const made = new Map<string, string>();
+      const madeTables = new Map<string, string>();
+      const made: MenuItemDto[] = [];
       let pos = have.top;
       for (const c of checked) {
         let action = c.action as MenuAction;
         if ((action.type === 'open_table' || action.type === 'add_row') && !action.table_id && c.new_table) {
-          let id = made.get(c.new_table.name);
+          let id = madeTables.get(c.new_table.name);
           if (!id) {
-            id = (await this.tables.create(userId, { name: c.new_table.name, columns: c.new_table.columns, rawRows: [], origin: 'manual' }, q)).table.id;
-            made.set(c.new_table.name, id);
+            id = (await this.tables.create(userId, { name: c.new_table.name, columns: c.new_table.columns, rawRows: [], origin: commandId ? 'llm' : 'manual' }, q, commandId)).table.id;
+            madeTables.set(c.new_table.name, id);
           }
           action = { type: action.type, table_id: id };
         }
-        await q.query('insert into menu_items(user_id, position, label, icon, description, action) values ($1, $2, $3, $4, $5, $6::jsonb)', [userId, ++pos, c.label, c.icon, c.description, JSON.stringify(action)]);
+        made.push(
+          (await q.one<MenuItemDto>('insert into menu_items(user_id, position, label, icon, description, action) values ($1, $2, $3, $4, $5, $6::jsonb) returning id, position, label, icon, description, action', [
+            userId,
+            ++pos,
+            c.label,
+            c.icon,
+            c.description,
+            JSON.stringify(action),
+          ]))!,
+        );
       }
-      return this.list(userId, q);
-    });
+      return { all: await this.list(userId, q), made, tables: [...madeTables].map(([name, id]) => ({ id, name })) };
+    }
+  }
+
+  /** 순서를 바꾼다(q 안에서). index 는 0부터, 나머지는 원래 순서대로. */
+  async moveIn(q: Queryable, userId: string, id: string, index: number): Promise<void> {
+    const ids = (await this.list(userId, q)).map((m) => m.id).filter((x) => x !== id);
+    ids.splice(Math.max(0, Math.min(ids.length, index)), 0, id);
+    for (const [i, mid] of ids.entries()) await q.query('update menu_items set position = $3, updated_at = now() where id = $1 and user_id = $2', [mid, userId, i]);
   }
 
   async update(userId: string, id: string, body: any): Promise<void> {
@@ -288,7 +313,7 @@ export class MenusService {
       const all = (await this.list(userId, q)).map((m) => m.id);
       const first = [...new Set((ids as unknown[]).filter((id): id is string => typeof id === 'string' && all.includes(id)))];
       const order = [...first, ...all.filter((id) => !first.includes(id))];
-      for (const [i, id] of order.entries()) await q.query('update menu_items set position = $3 where id = $1 and user_id = $2', [id, userId, i]);
+      for (const [i, id] of order.entries()) await q.query('update menu_items set position = $3, updated_at = now() where id = $1 and user_id = $2', [id, userId, i]);
     });
   }
 }

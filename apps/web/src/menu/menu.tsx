@@ -24,7 +24,9 @@ export function runMenu(action: MenuAction): void {
       app.open({ kind: 'table', tableId: action.table_id, addRow: true });
       break;
     case 'link':
-      window.open(action.url, '_blank', 'noopener,noreferrer');
+      // 서버가 검사하지만, 가져온 자료 등으로 들어온 이상한 주소는 화면에서도 열지 않는다(제미나이 검토)
+      if (/^https:\/\//i.test(action.url)) window.open(action.url, '_blank', 'noopener,noreferrer');
+      else app.toast('https 주소만 열 수 있습니다', 'error');
       break;
     case 'open_panel':
       app.open(action.panel === 'settings' ? { kind: 'settings' } : { kind: action.panel });
@@ -33,7 +35,17 @@ export function runMenu(action: MenuAction): void {
 }
 
 /** 동작을 사람 말로(표 이름까지) */
-export function describeAction(a: { type: MenuAction['type']; prompt?: string | null; url?: string | null; panel?: string | null; table_id?: string | null }, tables: TableDto[] | undefined, newTable?: MenuDraft['new_table']): string {
+export function describeAction(
+  a: {
+    type: MenuAction['type'];
+    prompt?: string | null;
+    url?: string | null;
+    panel?: string | null;
+    table_id?: string | null;
+  },
+  tables: TableDto[] | undefined,
+  newTable?: MenuDraft['new_table'],
+): string {
   const label = MENU_ACTION_LABEL[a.type];
   if (a.type === 'ask_ai') return `${label} — "${a.prompt ?? ''}"`;
   if (a.type === 'link') return `${label} — ${a.url ?? ''}`;
@@ -63,7 +75,11 @@ export function MenuBar() {
         </button>
       ))}
       {items.length === 0 && (
-        <button type="button" onClick={() => open({ kind: 'settings', tab: 'menu' })} className="flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-dashed px-3 text-sm whitespace-nowrap text-sub transition hover:bg-tint">
+        <button
+          type="button"
+          onClick={() => open({ kind: 'settings', tab: 'menu' })}
+          className="flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-dashed px-3 text-sm whitespace-nowrap text-sub transition hover:bg-tint"
+        >
           <Icon name="plus" size={16} />내 메뉴 만들기
         </button>
       )}
@@ -91,7 +107,9 @@ export function MenuRecommender({ onCreated }: { onCreated?: (made: MenuItemDto[
   const recommend = async () => {
     setBusy('recommend');
     try {
-      const r = await api.post<MenuRecommendation>('/menus/recommend', { text });
+      const r = await api.post<MenuRecommendation>('/menus/recommend', {
+        text,
+      });
       setRec(r);
       setPicked(r.menus.map(() => true));
       setLabels(r.menus.map((m) => m.label));
@@ -128,16 +146,38 @@ export function MenuRecommender({ onCreated }: { onCreated?: (made: MenuItemDto[
         <div className="space-y-2">
           {rec.menus.map((m, i) => (
             <label key={i} className={`flex gap-3 rounded-xl border p-3 transition ${picked[i] ? 'bg-card' : 'bg-ground opacity-60'}`}>
-              <input type="checkbox" className="mt-1.5 size-4 shrink-0 accent-[var(--color-accent)]" checked={picked[i] ?? false} onChange={(e) => setPicked(picked.map((p, j) => (j === i ? e.target.checked : p)))} />
+              <input
+                type="checkbox"
+                className="mt-1.5 size-4 shrink-0 accent-[var(--color-accent)]"
+                checked={picked[i] ?? false}
+                onChange={(e) => setPicked(picked.map((p, j) => (j === i ? e.target.checked : p)))}
+              />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="flex size-8 shrink-0 items-center justify-center rounded-[10px] bg-tint">
                     <Icon name={m.icon} size={16} />
                   </span>
-                  <input className="h-9 min-w-0 flex-1 rounded-md border-transparent bg-transparent px-1 text-base font-medium hover:border-line focus:border-field" value={labels[i] ?? ''} maxLength={16} onChange={(e) => setLabels(labels.map((l, j) => (j === i ? e.target.value : l)))} />
+                  <input
+                    className="h-9 min-w-0 flex-1 rounded-md border-transparent bg-transparent px-1 text-base font-medium hover:border-line focus:border-field"
+                    value={labels[i] ?? ''}
+                    maxLength={16}
+                    onChange={(e) => setLabels(labels.map((l, j) => (j === i ? e.target.value : l)))}
+                  />
                 </div>
                 {m.description && <p className="mt-1 text-sm">{m.description}</p>}
-                <p className="mt-1 text-xs text-sub">{describeAction({ type: m.action_type, prompt: m.prompt, url: m.url, panel: m.panel, table_id: m.table_id }, tables, m.new_table)}</p>
+                <p className="mt-1 text-xs text-sub">
+                  {describeAction(
+                    {
+                      type: m.action_type,
+                      prompt: m.prompt,
+                      url: m.url,
+                      panel: m.panel,
+                      table_id: m.table_id,
+                    },
+                    tables,
+                    m.new_table,
+                  )}
+                </p>
                 {m.new_table && (
                   <div className="mt-1.5 flex flex-wrap gap-1">
                     {m.new_table.columns.map((c) => (
@@ -172,7 +212,12 @@ export function MenuRecommender({ onCreated }: { onCreated?: (made: MenuItemDto[
       />
       <div className="flex flex-wrap gap-1.5">
         {EXAMPLES.map((ex) => (
-          <button key={ex} type="button" className="h-8 rounded-full border px-3 text-sm text-sub transition hover:bg-tint" onClick={() => setText((t) => (t.trim() ? `${t.trim()}, ${ex}` : ex))}>
+          <button
+            key={ex}
+            type="button"
+            className="h-8 rounded-full border px-3 text-sm text-sub transition hover:bg-tint"
+            onClick={() => setText((t) => (t.trim() ? `${t.trim()}, ${ex}` : ex).slice(0, 2000))}
+          >
             + {ex}
           </button>
         ))}

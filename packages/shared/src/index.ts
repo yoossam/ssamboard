@@ -8,3 +8,5 @@ export * from './view';
 export * from './form';
 export * from './menu';
 export * from './share';
+export * from './blockview';
+export * from './memory';

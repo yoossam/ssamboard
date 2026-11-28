@@ -40,10 +40,17 @@ export function toInput(messages: LlmMessage[]): Item[] {
         parts.push({ type: 'input_text', text: String(b.text ?? '') });
       } else if (b.type === 'image') {
         const s = b.source as { media_type: string; data: string };
-        parts.push({ type: 'input_image', image_url: `data:${s.media_type};base64,${s.data}` });
+        parts.push({
+          type: 'input_image',
+          image_url: `data:${s.media_type};base64,${s.data}`,
+        });
       } else if (b.type === 'document') {
         const s = b.source as { media_type: string; data: string };
-        parts.push({ type: 'input_file', filename: String(b.title ?? 'file.pdf'), file_data: `data:${s.media_type};base64,${s.data}` });
+        parts.push({
+          type: 'input_file',
+          filename: String(b.title ?? 'file.pdf'),
+          file_data: `data:${s.media_type};base64,${s.data}`,
+        });
       }
     }
     if (parts.length > 0) out.push({ role: 'user', content: parts });
@@ -66,6 +73,8 @@ export class ResponsesAccumulator {
   private usage: LlmUsage = { input_tokens: 0, output_tokens: 0 };
   private status = '';
   private readonly done = new Map<number, Item>();
+  /** 끝 이벤트(completed·incomplete)를 받았는지 — 못 받고 끊기면 일부만 온 답이라 오류로(코덱스·제미나이 검토) */
+  private finished = false;
 
   push(event: any, onText?: (delta: string) => void): void {
     switch (event?.type) {
@@ -77,10 +86,14 @@ export class ResponsesAccumulator {
         break;
       case 'response.completed':
       case 'response.incomplete': {
+        this.finished = true;
         const r = event.response ?? {};
         if (Array.isArray(r.output)) this.output = r.output;
         this.status = String(r.status ?? event.type.slice(9));
-        this.usage = { input_tokens: Number(r.usage?.input_tokens ?? 0), output_tokens: Number(r.usage?.output_tokens ?? 0) };
+        this.usage = {
+          input_tokens: Number(r.usage?.input_tokens ?? 0),
+          output_tokens: Number(r.usage?.output_tokens ?? 0),
+        };
         break;
       }
       case 'response.failed':
@@ -93,7 +106,7 @@ export class ResponsesAccumulator {
   }
 
   result(): LlmTurn {
-    // completed 가 오지 않았으면(끊김) 끝난 항목만으로
+    if (!this.finished) throw new LlmError('GPT 응답이 중간에 끊겼습니다. 다시 시도해 주세요.');
     const output = this.output.length > 0 ? this.output : [...this.done.entries()].sort((a, b) => a[0] - b[0]).map(([, v]) => v);
     const content = output.map((o) => ({ ...o }) as LlmBlock);
     const text = output
@@ -127,7 +140,10 @@ export class OpenAiAdapter implements LlmAdapter {
     try {
       res = await fetch(`${config.openaiBaseUrl}/v1/responses`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${apiKey}`,
+        },
         body: JSON.stringify(body),
         signal,
       });
@@ -149,10 +165,21 @@ export class OpenAiAdapter implements LlmAdapter {
       req.apiKey,
       {
         model: req.model,
-        instructions: req.system,
+        // OpenAI 는 같은 앞부분을 저절로 캐시한다 — 바뀌는 안내는 맨 뒤에
+        instructions: req.systemTail ? `${req.system}\n\n${req.systemTail}` : req.system,
         input: toInput(req.messages),
         max_output_tokens: req.maxTokens ?? 8000,
-        ...(req.tools?.length ? { tools: req.tools.map((t) => ({ type: 'function', name: t.name, description: t.description, parameters: t.input_schema, strict: false })) } : {}),
+        ...(req.tools?.length
+          ? {
+              tools: req.tools.map((t) => ({
+                type: 'function',
+                name: t.name,
+                description: t.description,
+                parameters: t.input_schema,
+                strict: false,
+              })),
+            }
+          : {}),
         store: false,
         include: ['reasoning.encrypted_content'],
         stream: true,
@@ -171,7 +198,14 @@ export class OpenAiAdapter implements LlmAdapter {
       instructions: req.system,
       input: [{ role: 'user', content: req.user }],
       max_output_tokens: req.maxTokens ?? 4000,
-      text: { format: { type: 'json_schema', name: 'answer', schema: req.schema, strict: false } },
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'answer',
+          schema: req.schema,
+          strict: false,
+        },
+      },
       store: false,
     });
     const body: any = await res.json();
@@ -181,7 +215,13 @@ export class OpenAiAdapter implements LlmAdapter {
       .find((c: Item) => c.type === 'output_text')?.text;
     if (typeof text !== 'string') throw new LlmError('GPT 가 정해진 형식으로 답하지 않았습니다.');
     try {
-      return { data: JSON.parse(text) as T, usage: { input_tokens: body.usage?.input_tokens ?? 0, output_tokens: body.usage?.output_tokens ?? 0 } };
+      return {
+        data: JSON.parse(text) as T,
+        usage: {
+          input_tokens: body.usage?.input_tokens ?? 0,
+          output_tokens: body.usage?.output_tokens ?? 0,
+        },
+      };
     } catch {
       throw new LlmError('GPT 의 답을 읽지 못했습니다.');
     }
@@ -190,7 +230,11 @@ export class OpenAiAdapter implements LlmAdapter {
   toolResults(results: LlmToolResult[]): LlmMessage {
     return {
       role: 'user',
-      content: results.map((r) => ({ type: 'function_call_output', call_id: r.id, output: r.isError ? `오류: ${r.content}` : r.content })),
+      content: results.map((r) => ({
+        type: 'function_call_output',
+        call_id: r.id,
+        output: r.isError ? `오류: ${r.content}` : r.content,
+      })),
     };
   }
 }

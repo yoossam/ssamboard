@@ -78,9 +78,17 @@ export interface LocalHandle {
 async function wipe(db: LocalDb | null): Promise<void> {
   await db?.close().catch(() => undefined);
   for (const name of [`/pglite/${DB_NAME}`, DB_NAME]) {
-    await new Promise<void>((r) => {
+    // 다른 탭이 열려 있어 막히면 지워진 척 넘어가지 않는다 — 공용 컴퓨터에 자료가 남는다(제미나이 검토)
+    await new Promise<void>((resolve, reject) => {
       const req = indexedDB.deleteDatabase(name);
-      req.onsuccess = req.onerror = req.onblocked = () => r();
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      req.onsuccess = req.onerror = () => {
+        if (timer) clearTimeout(timer);
+        resolve();
+      };
+      req.onblocked = () => {
+        timer ??= setTimeout(() => reject(new Error('다른 탭에 쌤보드가 열려 있어 이 브라우저의 자료를 지우지 못했습니다. 다른 쌤보드 탭을 모두 닫으면 지워집니다.')), 5000);
+      };
     });
   }
 }
@@ -173,8 +181,9 @@ export async function startLocal(opts: StartOptions): Promise<LocalHandle> {
 
   const router = await createLocalApp(db, identity, {
     onChange: () => sync?.markDirty(),
+    // 로그아웃 요청 자신이 끝나기를 기다리며 멈추지 않게, 요청이 끝난 뒤에 시작한다(코덱스 검토)
     onLogout: async () => {
-      await handle.signOut();
+      setTimeout(() => void handle.signOut().catch((e: Error) => alert(e.message)), 0);
     },
   });
   // 처음 만든 보드(기본 블록)도 드라이브에 올린다.

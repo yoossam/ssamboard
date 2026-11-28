@@ -18,6 +18,10 @@ import { AiController, HealthController, NotificationsController, SettingsContro
 import { NotificationsService } from './notifications/notifications.service';
 import { DataController } from './data/data.controller';
 import { MenusController } from './menus/menus.controller';
+import { MemoryController } from './memory/memory.controller';
+import { FilesController } from './files/files.controller';
+import { FilesService } from './files/files.service';
+import { MemoryService } from './memory/memory.service';
 import { MenusService } from './menus/menus.service';
 import { PublicShareController, SharesController } from './shares/shares.controller';
 import { SharesService } from './shares/shares.service';
@@ -44,6 +48,8 @@ import { WorkerService } from './worker/worker.service';
     AiController,
     TrashController,
     MenusController,
+    MemoryController,
+    FilesController,
     SharesController,
     PublicShareController,
   ],
@@ -62,6 +68,8 @@ import { WorkerService } from './worker/worker.service';
     CommandsService,
     AiService,
     MenusService,
+    MemoryService,
+    FilesService,
     SharesService,
     WorkerService,
     { provide: APP_GUARD, useClass: SessionGuard },

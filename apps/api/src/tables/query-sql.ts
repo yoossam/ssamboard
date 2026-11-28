@@ -11,8 +11,17 @@ export interface BuiltQuery {
   mode: 'rows' | 'agg';
 }
 
-const CAST: Partial<Record<Column['type'], string>> = { number: 'numeric', date: 'date', datetime: 'timestamptz', boolean: 'boolean' };
-const BUCKET_FORMAT = { day: 'YYYY-MM-DD', week: 'YYYY-MM-DD', month: 'YYYY-MM' } as const;
+const CAST: Partial<Record<Column['type'], string>> = {
+  number: 'numeric',
+  date: 'date',
+  datetime: 'timestamptz',
+  boolean: 'boolean',
+};
+const BUCKET_FORMAT = {
+  day: 'YYYY-MM-DD',
+  week: 'YYYY-MM-DD',
+  month: 'YYYY-MM',
+} as const;
 const COMPARE = { eq: '=', gt: '>', gte: '>=', lt: '<', lte: '<=' } as const;
 const escapeLike = (s: string) => s.replace(/[\\%_]/g, '\\$&');
 
@@ -28,7 +37,8 @@ export function buildQuerySql(tableId: string, userId: string, spec: QuerySpec, 
     return c;
   };
   const text = (c: Column) => `(r.data->>(${p(c.id)}::text))`;
-  const typed = (c: Column) => (CAST[c.type] ? `${text(c)}::${CAST[c.type]}` : text(c));
+  // 빈 글자('')를 숫자·날짜로 바꾸면 SQL 오류 — 빈 글자는 빈칸으로 본다(제미나이 검토)
+  const typed = (c: Column) => (CAST[c.type] ? `nullif(${text(c)}, '')::${CAST[c.type]}` : text(c));
   const lit = (c: Column, v: unknown) => (CAST[c.type] ? `${p(v)}::${CAST[c.type]}` : `${p(String(v))}::text`);
 
   const where = ['r.table_id = $1', 'r.user_id = $2', 'r.deleted_at is null'];
@@ -67,21 +77,51 @@ export function buildQuerySql(tableId: string, userId: string, spec: QuerySpec, 
     if (g.bucket) {
       const ts = c.type === 'datetime' ? `(${text(c)}::timestamptz at time zone ${p(timezone)}::text)` : `${text(c)}::date::timestamp`;
       const expr = `to_char(date_trunc('${g.bucket}', ${ts}), '${BUCKET_FORMAT[g.bucket]}')`;
-      return { col_id: c.id, group: expr, select: expr, label: `${c.name} (${BUCKET_LABEL[g.bucket]})`, type: 'text' };
+      return {
+        col_id: c.id,
+        group: expr,
+        select: expr,
+        label: `${c.name} (${BUCKET_LABEL[g.bucket]})`,
+        type: 'text',
+      };
     }
     const expr = typed(c);
     const select = c.type === 'number' ? `(${expr})::float8` : c.type === 'date' || c.type === 'datetime' ? `(${expr})::text` : expr;
-    return { col_id: c.id, group: expr, select, label: c.name, type: c.type as string };
+    return {
+      col_id: c.id,
+      group: expr,
+      select,
+      label: c.name,
+      type: c.type as string,
+    };
   });
 
   const aggs = (spec.agg ?? []).map((a) => {
-    if (!a.col_id) return { select: 'count(*)::int', label: AGG_LABEL.count, type: 'number' };
+    if (!a.col_id)
+      return {
+        select: 'count(*)::int',
+        label: AGG_LABEL.count,
+        type: 'number',
+      };
     const c = col(a.col_id);
-    if (a.fn === 'count') return { select: `count(${text(c)})::int`, label: `${c.name} ${AGG_LABEL.count}`, type: 'number' };
+    if (a.fn === 'count')
+      return {
+        select: `count(${text(c)})::int`,
+        label: `${c.name} ${AGG_LABEL.count}`,
+        type: 'number',
+      };
     const expr = `${a.fn}(${typed(c)})`;
     return c.type === 'number'
-      ? { select: `(${expr})::float8`, label: `${c.name} ${AGG_LABEL[a.fn]}`, type: 'number' }
-      : { select: `(${expr})::text`, label: `${c.name} ${AGG_LABEL[a.fn]}`, type: c.type as string };
+      ? {
+          select: `(${expr})::float8`,
+          label: `${c.name} ${AGG_LABEL[a.fn]}`,
+          type: 'number',
+        }
+      : {
+          select: `(${expr})::text`,
+          label: `${c.name} ${AGG_LABEL[a.fn]}`,
+          type: c.type as string,
+        };
   });
 
   const limit = `limit ${Math.max(1, Math.min(1000, Math.trunc(spec.limit ?? 100)))}`;
@@ -92,7 +132,11 @@ export function buildQuerySql(tableId: string, userId: string, spec: QuerySpec, 
     return {
       sql: `select r.id, r.data from data_rows r where ${where.join(' and ')} order by ${order.join(', ')} ${limit}`,
       params,
-      columns: schema.columns.map((c) => ({ key: c.id, label: c.name, type: c.type })),
+      columns: schema.columns.map((c) => ({
+        key: c.id,
+        label: c.name,
+        type: c.type,
+      })),
       mode: 'rows',
     };
   }
@@ -117,10 +161,7 @@ export function buildQuerySql(tableId: string, userId: string, spec: QuerySpec, 
   return {
     sql,
     params,
-    columns: [
-      ...groups.map((g, i) => ({ key: `g${i}`, label: g.label, type: g.type })),
-      ...aggs.map((a, i) => ({ key: `a${i}`, label: a.label, type: a.type })),
-    ],
+    columns: [...groups.map((g, i) => ({ key: `g${i}`, label: g.label, type: g.type })), ...aggs.map((a, i) => ({ key: `a${i}`, label: a.label, type: a.type }))],
     mode: 'agg',
   };
 }
@@ -128,7 +169,13 @@ export function buildQuerySql(tableId: string, userId: string, spec: QuerySpec, 
 /** DB에서 받은 행을 화면·LLM이 쓰는 결과 형식으로 바꾼다. */
 export function toQueryResult(built: BuiltQuery, rows: Record<string, any>[]): QueryResult {
   if (built.mode === 'rows') {
-    return { columns: built.columns, rows: rows.map((r) => built.columns.map((c) => r.data?.[c.key] ?? null)) };
+    return {
+      columns: built.columns,
+      rows: rows.map((r) => built.columns.map((c) => r.data?.[c.key] ?? null)),
+    };
   }
-  return { columns: built.columns, rows: rows.map((r) => built.columns.map((c) => r[c.key] ?? null)) };
+  return {
+    columns: built.columns,
+    rows: rows.map((r) => built.columns.map((c) => r[c.key] ?? null)),
+  };
 }

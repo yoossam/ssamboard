@@ -15,7 +15,7 @@ const overlaps = (a: GridPos, b: GridPos) => a.x < b.x + b.w && a.x + a.w > b.x 
  */
 export function placeBlock(existing: GridPos[], size: { w: number; h: number }, hint?: PlaceHint | null): GridPos {
   const w = Math.min(Math.max(1, size.w), GRID_COLS);
-  const h = Math.max(1, size.h);
+  const h = Math.min(Math.max(1, size.h), GRID_MAX_H);
   const bottom = existing.reduce((m, p) => Math.max(m, p.y + p.h), 0);
   if (hint) {
     const x = hint.endsWith('right') ? GRID_COLS - w : 0;
@@ -34,7 +34,5 @@ export function placeBlock(existing: GridPos[], size: { w: number; h: number }, 
 /** 휴대폰 순서: 따로 저장한 순서가 있으면 그것을, 없으면 데스크톱 배치의 위→아래, 왼→오른 순서를 따른다(MOB-1). */
 export function mobileOrder<T extends { layout_lg: GridPos; layout_sm: { order: number } | null }>(blocks: T[]): T[] {
   const custom = blocks.every((b) => b.layout_sm !== null);
-  return [...blocks].sort((a, b) =>
-    custom ? a.layout_sm!.order - b.layout_sm!.order : a.layout_lg.y - b.layout_lg.y || a.layout_lg.x - b.layout_lg.x,
-  );
+  return [...blocks].sort((a, b) => (custom ? a.layout_sm!.order - b.layout_sm!.order : a.layout_lg.y - b.layout_lg.y || a.layout_lg.x - b.layout_lg.x));
 }

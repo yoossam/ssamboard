@@ -246,9 +246,24 @@ body.react-draggable-transparent-selection .view-frame {
 .anim-fade {
   animation: fade 0.15s ease-out;
 }
+/* 승인 뒤 바뀐 블록 강조(2026-11-28 UX 토론 J) — 몇 초 동안 보라 고리가 두어 번 숨 쉰다 */
+@keyframes flash-ring {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 55%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 7px color-mix(in srgb, var(--color-accent) 20%, transparent);
+  }
+}
+.flash-ring {
+  animation: flash-ring 1.2s ease-in-out 3;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 55%, transparent);
+}
 @media (prefers-reduced-motion: reduce) {
   .anim-rise,
-  .anim-fade {
+  .anim-fade,
+  .flash-ring {
     animation: none;
   }
 }

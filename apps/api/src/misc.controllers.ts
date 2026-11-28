@@ -68,7 +68,13 @@ export class SettingsController {
       llm_provider: u.llm_provider,
       llm_model: u.llm_model,
       lock_minutes: u.lock_minutes,
-      models: MODELS.map(({ id, provider, label, input, output }) => ({ id, provider, label, input, output })),
+      models: MODELS.map(({ id, provider, label, input, output }) => ({
+        id,
+        provider,
+        label,
+        input,
+        output,
+      })),
       providers: PROVIDERS,
       api_keys: await this.llm.keys(u.id),
       month_cost: await this.llm.monthCost(u),
@@ -80,7 +86,12 @@ export class SettingsController {
   /** 일반 설정: 시간대·비용 한도·모델(USR-6). */
   @Put()
   async update(@Auth() ctx: AuthCtx, @Body() body: any): Promise<{ ok: true }> {
-    const patch: { timezone?: string; monthly_budget?: number; llm_model?: string; llm_provider?: string } = {};
+    const patch: {
+      timezone?: string;
+      monthly_budget?: number;
+      llm_model?: string;
+      llm_provider?: string;
+    } = {};
     if (body?.timezone !== undefined) {
       const tz = str(body.timezone, '시간대', { max: 60 });
       try {
@@ -123,7 +134,7 @@ export class SettingsController {
       await this.audit.log(ctx, 'settings.lock_minutes', String(body.lock_minutes));
     }
     if (body?.new_pin !== undefined) {
-      await this.db.query('update users set pin_hash = $2, pin_fail_count = 0 where id = $1', [ctx.user.id, await this.auth.hashPin(body.new_pin)]);
+      await this.db.query('update users set pin_hash = $2, pin_fail_count = 0, pin_locked_until = null where id = $1', [ctx.user.id, await this.auth.hashPin(body.new_pin)]);
       await this.auth.revokeAll(ctx.user.id, ctx.session.id);
       await this.audit.log(ctx, 'pin.change');
     }
@@ -151,7 +162,12 @@ export class AiController {
   /** AI 창 입력. 응답은 SSE로 흘려보낸다(ONE-8): text · tool · plan · error · done 이벤트. */
   @Post('messages')
   async messages(@Auth() ctx: AuthCtx, @Body() body: any, @Res() res: Response): Promise<void> {
-    res.status(200).set({ 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', 'X-Accel-Buffering': 'no', Connection: 'keep-alive' });
+    res.status(200).set({
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      'X-Accel-Buffering': 'no',
+      Connection: 'keep-alive',
+    });
     res.flushHeaders();
     const abort = new AbortController();
     res.on('close', () => {
@@ -163,10 +179,20 @@ export class AiController {
     try {
       await this.ai.run(ctx.user, obj(body, '요청'), emit, abort.signal);
     } catch (e: any) {
-      if (!abort.signal.aborted) emit({ type: 'error', message: String(e?.response?.message ?? e?.message ?? '요청을 처리하지 못했습니다.').slice(0, 300) });
+      if (!abort.signal.aborted)
+        emit({
+          type: 'error',
+          message: String(e?.response?.message ?? e?.message ?? '요청을 처리하지 못했습니다.').slice(0, 300),
+        });
     } finally {
       res.end();
     }
+  }
+
+  /** 처리 결과함 */
+  @Get('commands')
+  commandList(@Auth() ctx: AuthCtx): Promise<CommandDto[]> {
+    return this.commands.list(ctx.user.id);
   }
 
   @Get('commands/:id')
@@ -201,7 +227,11 @@ export class UploadsController {
 
   /** CSV·XLSX 업로드(최대 10MB). 서버가 파싱해 미리보기를 돌려준다. 저장은 아직 하지 않는다. */
   @Post()
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024, files: 1 } }))
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+    }),
+  )
   upload(@Auth() ctx: AuthCtx, @UploadedFile() file: Express.Multer.File | undefined): Promise<UploadPreview> {
     if (!file) bad('파일이 없습니다.');
     return this.uploads.save(ctx.user.id, file!);
@@ -240,7 +270,12 @@ export class TrashController {
   @Post(':id/restore')
   async restore(@Auth() ctx: AuthCtx, @Param('id') id: string): Promise<{ ok: true; kind: string }> {
     for (const table of TRASH_TABLES) {
-      const rows = await this.db.query(`update ${table} set deleted_at = null, updated_at = now() where id = $1 and user_id = $2 and deleted_at is not null returning id`, [uuid(id), ctx.user.id]);
+      // 지운 표에 든 줄만 따로 되살리지 않는다(표를 먼저 되살린다 — 제미나이 검토)
+      const parentOk = table === 'data_rows' ? ' and exists (select 1 from data_tables t where t.id = data_rows.table_id and t.deleted_at is null)' : '';
+      const rows = await this.db.query(`update ${table} set deleted_at = null, updated_at = now() where id = $1 and user_id = $2 and deleted_at is not null${parentOk} returning id`, [
+        uuid(id),
+        ctx.user.id,
+      ]);
       if (rows.length > 0) return { ok: true, kind: table };
     }
     return notFound('휴지통 항목');

@@ -80,45 +80,82 @@ export class WorkerService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** 마감이 된 할 일(NTF-1). 한 번 알린 것은 reminded_at으로 표시하고, 마감을 바꾸면 다시 알린다. */
+  /** 마감이 된 할 일(NTF-1). 한 번 알린 것은 reminded_at으로 표시하고, 마감을 바꾸면 다시 알린다.
+   * 표시와 알림을 한 트랜잭션으로 — 알림이 실패하면 표시도 되돌아가 다음에 다시 알린다(코덱스·제미나이 검토). */
   async taskReminders(): Promise<number> {
-    const rows = await this.db.query<{ id: string; user_id: string; title: string; due_at: Date; timezone: string }>(
-      `update tasks t set reminded_at = now() from users u
-        where u.id = t.user_id and t.deleted_at is null and t.status = 'open' and t.reminded_at is null
-          and t.due_at <= now() and t.due_at > now() - interval '1 day'
-        returning t.id, t.user_id, t.title, t.due_at, u.timezone`,
+    const due = await this.db.query<{ id: string }>(
+      `select t.id from tasks t where t.deleted_at is null and t.status = 'open' and t.reminded_at is null and t.due_at <= now() and t.due_at > now() - interval '1 day' limit 500`,
     );
-    for (const r of rows) {
-      await this.notifications.notify(r.user_id, {
-        source: 'tasks',
-        title: `할 일 마감: ${r.title}`,
-        body: `마감 ${formatWhen(new Date(r.due_at).toISOString(), r.timezone)}`,
-        priority: 'urgent',
-        ref: { task_id: r.id },
-      });
+    let n = 0;
+    for (const { id } of due) {
+      await this.db
+        .tx(async (q) => {
+          const r = await q.one<{
+            id: string;
+            user_id: string;
+            title: string;
+            due_at: Date;
+            timezone: string;
+          }>(
+            `update tasks t set reminded_at = now() from users u where t.id = $1 and u.id = t.user_id and t.reminded_at is null and t.deleted_at is null and t.status = 'open' and t.due_at <= now() and t.due_at > now() - interval '1 day' returning t.id, t.user_id, t.title, t.due_at, u.timezone`,
+            [id],
+          );
+          if (!r) return;
+          await this.notifications.notify(
+            r.user_id,
+            {
+              source: 'tasks',
+              title: `할 일 마감: ${r.title}`,
+              body: `마감 ${formatWhen(new Date(r.due_at).toISOString(), r.timezone)}`,
+              priority: 'urgent',
+              ref: { task_id: r.id },
+            },
+            q,
+          );
+          n++;
+        })
+        .catch((e) => this.log.error(`taskReminder ${id}: ${e?.message ?? e}`));
     }
-    return rows.length;
+    return n;
   }
 
   /** 곧 시작하는 일정(시작 10분 전). */
   async eventReminders(): Promise<number> {
-    const rows = await this.db.query<{ id: string; user_id: string; title: string; start_at: Date; timezone: string }>(
-      `update events e set reminded_at = now() from users u
-        where u.id = e.user_id and e.deleted_at is null and e.reminded_at is null
-          and e.start_at <= now() + make_interval(mins => $1) and e.start_at > now() - interval '5 minutes'
-        returning e.id, e.user_id, e.title, e.start_at, u.timezone`,
+    const soon = await this.db.query<{ id: string }>(
+      `select e.id from events e where e.deleted_at is null and e.reminded_at is null and e.start_at <= now() + make_interval(mins => $1) and e.start_at > now() - interval '5 minutes' limit 500`,
       [REMIND_MINUTES],
     );
-    for (const r of rows) {
-      await this.notifications.notify(r.user_id, {
-        source: 'events',
-        title: `곧 시작: ${r.title}`,
-        body: `시작 ${formatWhen(new Date(r.start_at).toISOString(), r.timezone)}`,
-        priority: 'normal',
-        ref: { event_id: r.id },
-      });
+    let n = 0;
+    for (const { id } of soon) {
+      await this.db
+        .tx(async (q) => {
+          const r = await q.one<{
+            id: string;
+            user_id: string;
+            title: string;
+            start_at: Date;
+            timezone: string;
+          }>(
+            `update events e set reminded_at = now() from users u where e.id = $1 and u.id = e.user_id and e.reminded_at is null and e.deleted_at is null and e.start_at <= now() + make_interval(mins => $2) and e.start_at > now() - interval '5 minutes' returning e.id, e.user_id, e.title, e.start_at, u.timezone`,
+            [id, REMIND_MINUTES],
+          );
+          if (!r) return;
+          await this.notifications.notify(
+            r.user_id,
+            {
+              source: 'events',
+              title: `곧 시작: ${r.title}`,
+              body: `시작 ${formatWhen(new Date(r.start_at).toISOString(), r.timezone)}`,
+              priority: 'normal',
+              ref: { event_id: r.id },
+            },
+            q,
+          );
+          n++;
+        })
+        .catch((e) => this.log.error(`eventReminder ${id}: ${e?.message ?? e}`));
     }
-    return rows.length;
+    return n;
   }
 
   /** 주기가 된 연결된 표를 원본 시트에서 다시 읽는다(GSH-3). 실패·구조 변경은 알림으로 남는다. */

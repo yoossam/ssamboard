@@ -7,7 +7,7 @@
  *  - 주민등록번호·카드번호 모양은 가린다(maskPii). 표는 고른 칸을 빼고, 줄은 MAX_ROWS 까지만.
  *  - 알림·AI 화면 블록은 공유하지 않는다(SHAREABLE_BLOCKS).
  */
-import { maskPii, SHAREABLE_BLOCKS, type BlockDto, type Column, type ShareOptions } from '@jarvis/shared';
+import { eventDaysOf, maskPii, SHAREABLE_BLOCKS, taskFilterOf, type BlockDto, type Column, type ShareOptions } from '@jarvis/shared';
 import { bad } from '../common/http';
 import type { ItemsService } from '../items/items.service';
 import type { TablesService } from '../tables/tables.service';
@@ -36,11 +36,30 @@ export interface ShareView {
 const esc = (s: string): string => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 const clean = (s: unknown): string => maskPii(typeof s === 'string' ? s : s === null || s === undefined ? '' : String(s));
 
+/** 그 시간대의 오늘 0시(ms) */
+function startOfDay(timeZone: string): number {
+  const now = new Date();
+  const ymd = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now);
+  const off = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'longOffset' }).format(now).split('GMT')[1] || '+00:00';
+  return new Date(`${ymd}T00:00:00${off === '' ? 'Z' : off}`).getTime();
+}
+
 function fmtDate(iso: string | null | undefined, timeZone: string, withTime: boolean): string {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return clean(iso);
-  return new Intl.DateTimeFormat('ko-KR', { timeZone, month: 'long', day: 'numeric', weekday: 'short', ...(withTime ? { hour: '2-digit', minute: '2-digit' } : {}) }).format(d);
+  return new Intl.DateTimeFormat('ko-KR', {
+    timeZone,
+    month: 'long',
+    day: 'numeric',
+    weekday: 'short',
+    ...(withTime ? { hour: '2-digit', minute: '2-digit' } : {}),
+  }).format(d);
 }
 
 function cell(v: unknown, c: Pick<Column, 'type'>, timeZone: string): string {
@@ -73,33 +92,53 @@ function pickColumns<T>(all: T[], key: (c: T) => string, options: ShareOptions):
 }
 
 /** 블록 하나의 지금 자료 — 그 사용자 것만 읽는다(서비스들이 user_id 로 거른다). */
-export async function buildShareView(
-  deps: { items: ItemsService; tables: TablesService },
-  userId: string,
-  timeZone: string,
-  block: BlockDto,
-  options: ShareOptions,
-): Promise<ShareView> {
+export async function buildShareView(deps: { items: ItemsService; tables: TablesService }, userId: string, timeZone: string, block: BlockDto, options: ShareOptions): Promise<ShareView> {
   if (!SHAREABLE_BLOCKS.includes(block.type)) bad('이 블록은 공유할 수 없습니다(할 일·일정·표·메모·AI 결과만 됩니다).');
   const title = clean(block.title).slice(0, 120) || '쌤보드';
   const updated_at = new Date().toISOString();
   switch (block.type) {
     case 'tasks': {
-      const tasks = (await deps.items.listTasks(userId, 'open')).slice(0, SHARE_MAX_ROWS);
-      return { title, kind: 'list', items: tasks.map((t) => ({ title: clean(t.title), when: t.due_at ? `${fmtDate(t.due_at, timeZone, false)}까지` : '' })), empty: '할 일이 없습니다', updated_at };
+      // 블록에 보이는 만큼만 — 블록의 '보여 줄 할 일' 설정을 그대로 따른다(코덱스 검토)
+      const f = taskFilterOf(block.config);
+      const all = await deps.items.listTasks(userId, f === 'all' ? undefined : 'open');
+      const limit = startOfDay(timeZone) + (f === 'today' ? 1 : 7) * 86_400_000;
+      const tasks = (f === 'today' || f === 'week' ? all.filter((t) => t.due_at && new Date(t.due_at).getTime() < limit) : all).slice(0, SHARE_MAX_ROWS);
+      return {
+        title,
+        kind: 'list',
+        items: tasks.map((t) => ({
+          title: clean(t.title),
+          when: t.due_at ? `${fmtDate(t.due_at, timeZone, false)}까지` : '',
+        })),
+        empty: '할 일이 없습니다',
+        updated_at,
+      };
     }
     case 'events': {
-      const from = new Date(Date.now() - 86_400_000).toISOString();
-      const to = new Date(Date.now() + 60 * 86_400_000).toISOString();
+      // 블록의 '보여 줄 기간'(오늘부터 며칠)만(코덱스 검토)
+      const from = new Date(startOfDay(timeZone)).toISOString();
+      const to = new Date(startOfDay(timeZone) + eventDaysOf(block.config) * 86_400_000).toISOString();
       const events = (await deps.items.listEvents(userId, timeZone, from, to)).slice(0, SHARE_MAX_ROWS);
-      return { title, kind: 'list', items: events.map((e) => ({ title: clean(e.title), when: fmtDate(e.start_at, timeZone, true) })), empty: '다가오는 일정이 없습니다', updated_at };
+      return {
+        title,
+        kind: 'list',
+        items: events.map((e) => ({
+          title: clean(e.title),
+          when: fmtDate(e.start_at, timeZone, true),
+        })),
+        empty: '다가오는 일정이 없습니다',
+        updated_at,
+      };
     }
     case 'table': {
       if (!block.source_table_id) bad('표 블록에 원본 표가 없습니다.');
       const table = await deps.tables.require(userId, block.source_table_id!);
       const cols = pickColumns(table.schema.columns, (c) => c.id, options);
       if (cols.length === 0) bad('보여 줄 칸이 없습니다. 숨긴 칸을 줄여 주세요.');
-      const page = await deps.tables.rows(userId, table.id, { page: 1, size: SHARE_MAX_ROWS });
+      const page = await deps.tables.rows(userId, table.id, {
+        page: 1,
+        size: SHARE_MAX_ROWS,
+      });
       return {
         title,
         kind: 'table',
@@ -133,10 +172,22 @@ export async function buildShareView(
           shown: keep.map(({ c }) => c.key),
         };
       }
-      return { title, kind: 'text', text, empty: '내용이 없습니다', updated_at };
+      return {
+        title,
+        kind: 'text',
+        text,
+        empty: '내용이 없습니다',
+        updated_at,
+      };
     }
     default:
-      return { title, kind: 'text', text: clean(block.config.text).slice(0, MAX_TEXT), empty: '내용이 없습니다', updated_at };
+      return {
+        title,
+        kind: 'text',
+        text: clean(block.config.text).slice(0, MAX_TEXT),
+        empty: '내용이 없습니다',
+        updated_at,
+      };
   }
 }
 
@@ -164,7 +215,10 @@ export function renderSharePage(view: ShareView, timeZone: string, note = ''): s
   let body = '';
   if (view.text) body += `<p class="text">${esc(view.text)}</p>`;
   if (view.kind === 'list') {
-    body += view.items && view.items.length > 0 ? `<ul>${view.items.map((i) => `<li><span>${esc(i.title)}</span>${i.when ? `<span class="when">${esc(i.when)}</span>` : ''}</li>`).join('')}</ul>` : `<p class="empty">${esc(view.empty)}</p>`;
+    body +=
+      view.items && view.items.length > 0
+        ? `<ul>${view.items.map((i) => `<li><span>${esc(i.title)}</span>${i.when ? `<span class="when">${esc(i.when)}</span>` : ''}</li>`).join('')}</ul>`
+        : `<p class="empty">${esc(view.empty)}</p>`;
   } else if (view.kind === 'table') {
     body +=
       view.rows && view.rows.length > 0
@@ -174,7 +228,13 @@ export function renderSharePage(view: ShareView, timeZone: string, note = ''): s
   } else if (!view.text) {
     body += `<p class="empty">${esc(view.empty)}</p>`;
   }
-  const when = new Intl.DateTimeFormat('ko-KR', { timeZone, month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(view.updated_at));
+  const when = new Intl.DateTimeFormat('ko-KR', {
+    timeZone,
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(view.updated_at));
   return `<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex, nofollow"><meta name="referrer" content="no-referrer">
 <title>${esc(view.title)}</title><style>${STYLE}</style></head>

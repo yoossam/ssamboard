@@ -76,7 +76,12 @@ export class LocalRouter {
   }
 
   private match(method: string, path: string): { route: CompiledRoute; params: Record<string, string> } | null {
-    const segs = clean(path).map(decodeURIComponent);
+    let segs: string[];
+    try {
+      segs = clean(path).map(decodeURIComponent);
+    } catch {
+      return null; // 잘못된 % 표기 → 없는 길(코덱스·제미나이 검토)
+    }
     for (const route of this.routes) {
       if (route.method !== method || route.parts.length !== segs.length) continue;
       const params: Record<string, string> = {};
@@ -100,7 +105,15 @@ export class LocalRouter {
     const url = new URL(input, 'http://local');
     const path = url.pathname.replace(/^\/api(?=\/|$)/, '');
     const found = this.match(method, path);
-    if (!found) return json({ statusCode: 404, message: '구글 드라이브 트랙에서는 아직 쓸 수 없는 기능입니다.', error: 'Not Found' }, 404);
+    if (!found)
+      return json(
+        {
+          statusCode: 404,
+          message: '구글 드라이브 트랙에서는 아직 쓸 수 없는 기능입니다.',
+          error: 'Not Found',
+        },
+        404,
+      );
 
     let body: any = undefined;
     let file: unknown = undefined;
@@ -109,10 +122,17 @@ export class LocalRouter {
       // multer 가 주는 모양으로: 이름은 UTF-8 바이트를 latin1 글자로(서버 코드가 되돌린다), 내용은 Buffer.
       if (f instanceof Blob) {
         const name = (f as File).name ?? 'file';
+        // 크기는 읽기 전에 본다(큰 파일을 통째로 메모리에 올리지 않게)
+        if (f.size > 10 * 1024 * 1024) return json({ statusCode: 413, message: '파일은 10MB 까지입니다.' }, 413);
         const latin1 = String.fromCharCode(...new TextEncoder().encode(name));
         const buffer = (globalThis as any).Buffer.from(await f.arrayBuffer());
         if (buffer.length > 10 * 1024 * 1024) return json({ statusCode: 413, message: '파일은 10MB 까지입니다.' }, 413);
-        file = { originalname: latin1, buffer, size: buffer.length, mimetype: f.type };
+        file = {
+          originalname: latin1,
+          buffer,
+          size: buffer.length,
+          mimetype: f.type,
+        };
       }
       body = Object.fromEntries([...init.body.entries()].filter(([, v]) => typeof v === 'string'));
     } else if (typeof init.body === 'string' && init.body) {
@@ -138,7 +158,10 @@ export class LocalRouter {
     };
     const res = new LocalResponse(init.signal ?? undefined);
     const ctx: ExecutionContext = {
-      switchToHttp: () => ({ getRequest: <T>() => req as T, getResponse: <T>() => res as T }),
+      switchToHttp: () => ({
+        getRequest: <T>() => req as T,
+        getResponse: <T>() => res as T,
+      }),
       getHandler: () => found.route.instance[found.route.key],
       getClass: () => found.route.instance.constructor,
     };
@@ -184,7 +207,10 @@ export class LocalRouter {
 }
 
 function json(value: unknown, status = 200): Response {
-  return new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
 }
 
 function errorResponse(e: unknown): Response {
@@ -193,7 +219,13 @@ function errorResponse(e: unknown): Response {
     return json(typeof r === 'string' ? { statusCode: e.getStatus(), message: r } : { statusCode: e.getStatus(), ...r }, e.getStatus());
   }
   console.error('[쌤보드 로컬]', e);
-  return json({ statusCode: 500, message: '처리하지 못했습니다. 잠시 뒤 다시 시도하세요.' }, 500);
+  return json(
+    {
+      statusCode: 500,
+      message: '처리하지 못했습니다. 잠시 뒤 다시 시도하세요.',
+    },
+    500,
+  );
 }
 
 /** express Response 의 쓰이는 부분만. 흘려보내기(write)는 ReadableStream 으로 이어 준다. */
@@ -225,7 +257,12 @@ class LocalResponse {
   private start(): void {
     if (this.started) return;
     this.started = true;
-    this.resolveResponse(new Response(this.stream, { status: this.statusCode, headers: this.headers }));
+    this.resolveResponse(
+      new Response(this.stream, {
+        status: this.statusCode,
+        headers: this.headers,
+      }),
+    );
   }
 
   status(code: number): this {

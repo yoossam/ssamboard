@@ -4,7 +4,7 @@ import { Auth, type AuthCtx } from '../auth/auth.types';
 import { Audit } from '../common/audit.service';
 import { bad } from '../common/http';
 import { Db } from '../db/db.service';
-import { exportData, importData, type SyncData } from './transfer';
+import { exportSnapshot, importData, type SyncData } from './transfer';
 
 /**
  * 보드 자료 내보내기·가져오기(두 트랙 공통 파일 — 구글 드라이브 트랙의 설정 → 드라이브와 같은 모양).
@@ -20,7 +20,7 @@ export class DataController {
 
   @Get('export')
   async export(@Auth() ctx: AuthCtx): Promise<SyncData> {
-    const data = await exportData(this.db, ctx.user.id);
+    const data = await exportSnapshot(this.db, ctx.user.id);
     await this.audit.log(ctx, 'data.export');
     return data;
   }

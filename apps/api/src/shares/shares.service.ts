@@ -2,10 +2,10 @@ import { randomBytes } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import { SHARE_DAYS, SHAREABLE_BLOCKS, type BlockDto, type ShareDto, type ShareOptions } from '@jarvis/shared';
 import type { UserRow } from '../auth/auth.types';
-import { bad, notFound } from '../common/http';
+import { bad, isUuid, notFound } from '../common/http';
 import { config } from '../config';
 import { ConnectorsService } from '../connectors/connectors.service';
-import { Db } from '../db/db.service';
+import { Db, type Queryable } from '../db/db.service';
 import { ItemsService } from '../items/items.service';
 import { TablesService } from '../tables/tables.service';
 import { buildShareView, renderGonePage, renderSharePage } from './share-page';
@@ -75,15 +75,20 @@ export class SharesService {
     private readonly connectors: ConnectorsService,
   ) {}
 
+  /** 이 설치의 공유 방식('server' = /s/ 페이지, 'drive' = 구글 문서) — 승인 화면에 실제 기간을 적을 때 */
+  mode(): 'server' | 'drive' {
+    return config.shareMode;
+  }
+
   private async block(userId: string, blockId: string): Promise<BlockDto | null> {
     return this.db.one<BlockDto>('select * from blocks where id = $1 and user_id = $2 and deleted_at is null', [blockId, userId]);
   }
 
   async list(userId: string, blockId?: string): Promise<ShareDto[]> {
-    const rows = await this.db.query<ShareRow>(
-      `select * from shares where user_id = $1 and ($2::uuid is null or block_id = $2::uuid) order by revoked_at nulls first, created_at desc limit 100`,
-      [userId, blockId ?? null],
-    );
+    const rows = await this.db.query<ShareRow>(`select * from shares where user_id = $1 and ($2::uuid is null or block_id = $2::uuid) order by revoked_at nulls first, created_at desc limit 100`, [
+      userId,
+      blockId ?? null,
+    ]);
     return rows.map(dto);
   }
 
@@ -93,13 +98,14 @@ export class SharesService {
     return { html: renderSharePage(view, user.timezone, '미리 보기') };
   }
 
-  private async prepare(user: UserRow, body: any) {
-    const blockId = typeof body?.block_id === 'string' ? body.block_id : bad('공유할 블록을 고르세요.');
+  /** fixedShow: AI 계획 승인 때 — 승인 화면에서 본 '보이는 칸' 그대로(그사이 더한 칸은 나가지 않게 — 코덱스 검토) */
+  private async prepare(user: UserRow, body: any, fixedShow?: string[]) {
+    const blockId = isUuid(body?.block_id) ? (body.block_id as string) : bad('공유할 블록을 고르세요.');
     const block = (await this.block(user.id, blockId)) ?? notFound('블록');
     if (!SHAREABLE_BLOCKS.includes(block!.type)) bad('이 블록은 공유할 수 없습니다(할 일·일정·표·메모·AI 결과만 됩니다).');
     const days = config.shareMode === 'drive' ? 0 : Number(body?.days ?? 30);
     if (!(SHARE_DAYS as readonly number[]).includes(days)) bad(`기간은 ${SHARE_DAYS.filter(Boolean).join('·')}일 또는 기간 없음(0) 중 하나입니다.`);
-    const asked = checkOptions(body?.options);
+    const asked: ShareOptions = fixedShow ? { show_columns: fixedShow } : checkOptions(body?.options);
     const title = clean(typeof body?.title === 'string' ? body.title.trim() : '').slice(0, 120) || clean(block!.title) || '쌤보드';
     // 한 번 만들어 본다 — 못 만드는 블록(원본 표 없음·칸 모두 숨김)이면 링크를 만들기 전에 알린다. 보인 칸을 저장해 둔다.
     const view = await buildShareView({ items: this.items, tables: this.tables }, user.id, user.timezone, { ...block!, title }, asked);
@@ -107,16 +113,17 @@ export class SharesService {
     return { block: block!, days, title, view, options };
   }
 
-  async create(user: UserRow, body: any): Promise<ShareDto> {
-    const { block, days, title, view, options } = await this.prepare(user, body);
+  /** q 를 주면(AI 계획 승인) 서버 트랙 기록을 그 트랜잭션 안에서 한다. 구글 문서는 바깥 일이라 트랜잭션과 따로다. */
+  async create(user: UserRow, body: any, tx?: Queryable, fixedShow?: string[]): Promise<ShareDto> {
+    const { block, days, title, view, options } = await this.prepare(user, body, fixedShow);
     const token = randomBytes(24).toString('hex');
-    const insert = (q: Pick<Db, 'one'>, externalId: string | null) =>
+    const insert = (q: Pick<Queryable, 'one'>, externalId: string | null) =>
       q.one<ShareRow>(
         `insert into shares(user_id, block_id, token, title, options, external_id, expires_at)
          values ($1, $2, $3, $4, $5::jsonb, $6, case when $7::int > 0 then now() + make_interval(days => $7::int) else null end) returning *`,
         [user.id, block.id, token, title, JSON.stringify(options), externalId, days],
       );
-    if (config.shareMode !== 'drive') return dto((await insert(this.db, null))!);
+    if (config.shareMode !== 'drive') return dto((await insert(tx ?? this.db, null))!);
 
     // 구글 문서: ① 비공개로 만들기 → ② 기록 → ③ 공개 권한 → ④ 주소·권한 기록. 중간에 실패하면 문서를 지우고 기록도 지운다(반쪽 공개 문서가 남지 않게 — 코덱스 검토).
     const token2 = await this.connectors.driveToken(user.id);
@@ -124,14 +131,32 @@ export class SharesService {
     let row: ShareRow | null = null;
     try {
       row = await insert(this.db, doc.id);
-      const perm = await this.drive(token2, `${DRIVE_API}/${encodeURIComponent(doc.id)}/permissions?fields=id`, { method: 'POST', body: JSON.stringify({ role: 'reader', type: 'anyone' }) }, '링크를 열');
+      const perm = await this.drive(
+        token2,
+        `${DRIVE_API}/${encodeURIComponent(doc.id)}/permissions?fields=id`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ role: 'reader', type: 'anyone' }),
+        },
+        '링크를 열',
+      );
       const permId = String(((await perm.json()) as { id?: string }).id ?? 'anyoneWithLink');
       // 그 사이 끄기를 눌렀으면(revoked_at) 공개로 바꾸지 않고 아래에서 치운다 — 확인과 기록을 한 문장으로(코덱스 재확인)
-      const done = await this.db.one<ShareRow>('update shares set external_url = $2, external_perm = $3, updated_at = now() where id = $1 and revoked_at is null returning *', [row!.id, doc.url, permId]);
+      const done = await this.db.one<ShareRow>('update shares set external_url = $2, external_perm = $3, updated_at = now() where id = $1 and revoked_at is null returning *', [
+        row!.id,
+        doc.url,
+        permId,
+      ]);
       if (!done) bad('만드는 사이 링크를 껐습니다. 공개하지 않았습니다.');
       return dto(done);
     } catch (e) {
-      const gone = await fetch(`${DRIVE_API}/${encodeURIComponent(doc.id)}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token2}` } }).then((r) => r.ok || r.status === 404, () => false);
+      const gone = await fetch(`${DRIVE_API}/${encodeURIComponent(doc.id)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token2}` },
+      }).then(
+        (r) => r.ok || r.status === 404,
+        () => false,
+      );
       // 문서를 지웠을 때만 기록도 지운다. 못 지웠으면 기록을 남겨(목록에 '만들다 만 링크') 끄기로 다시 치울 수 있게(코덱스 재확인).
       if (row && gone) await this.db.query('delete from shares where id = $1', [row.id]);
       if (!gone) bad(`링크를 만들지 못했고, 만들다 만 구글 문서("쌤보드 공유 · ${title}")를 지우지 못했습니다. 목록에서 끄기를 누르거나 드라이브에서 직접 지워 주세요.`);
@@ -167,11 +192,39 @@ export class SharesService {
     if (row!.external_id && !row!.revoked_at) {
       const token = await this.connectors.driveToken(user.id);
       const file = encodeURIComponent(row!.external_id);
-      const perm = encodeURIComponent(row!.external_perm ?? 'anyoneWithLink');
-      const res = await fetch(`${DRIVE_API}/${file}/permissions/${perm}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
-      // 404 = 권한(또는 문서)이 이미 없음 → 꺼진 것
-      if (!res || (!res.ok && res.status !== 404)) bad(`구글 문서의 공개를 끄지 못했습니다(${res?.status ?? '연결 실패'}). 잠시 뒤 다시 누르거나 드라이브에서 공유를 꺼 주세요.`);
-      const trashed = await fetch(`${DRIVE_API}/${file}`, { method: 'PATCH', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ trashed: true }) }).then((r) => r.ok || r.status === 404, () => false);
+      // 권한 id 를 모르면(만들다 멈춘 링크) 문서의 '누구나' 권한을 찾아 지운다 — 짐작한 id 의 404 를 '꺼짐'으로 믿지 않는다(제미나이 검토)
+      let perms: string[] = row!.external_perm ? [row!.external_perm] : [];
+      if (perms.length === 0) {
+        const list = await fetch(`${DRIVE_API}/${file}/permissions?fields=permissions(id,type)`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
+        if (list?.status === 404) perms = [];
+        else if (!list?.ok) bad(`구글 문서의 공개 상태를 확인하지 못했습니다(${list?.status ?? '연결 실패'}). 잠시 뒤 다시 눌러 주세요.`);
+        else
+          perms = (
+            (
+              (await list.json()) as {
+                permissions?: { id: string; type: string }[];
+              }
+            ).permissions ?? []
+          )
+            .filter((p) => p.type === 'anyone')
+            .map((p) => p.id);
+      }
+      for (const perm of perms) {
+        const res = await fetch(`${DRIVE_API}/${file}/permissions/${encodeURIComponent(perm)}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
+        // 404 = 그 권한(또는 문서)이 이미 없음 → 꺼진 것
+        if (!res || (!res.ok && res.status !== 404)) bad(`구글 문서의 공개를 끄지 못했습니다(${res?.status ?? '연결 실패'}). 잠시 뒤 다시 누르거나 드라이브에서 공유를 꺼 주세요.`);
+      }
+      const trashed = await fetch(`${DRIVE_API}/${file}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ trashed: true }),
+      }).then(
+        (r) => r.ok || r.status === 404,
+        () => false,
+      );
       if (!trashed) warning = '공개는 껐습니다. 구글 문서는 휴지통으로 옮기지 못해 드라이브에 남아 있습니다(나만 볼 수 있음).';
     }
     await this.db.query('update shares set revoked_at = coalesce(revoked_at, now()), updated_at = now() where id = $1', [id]);
@@ -203,7 +256,14 @@ export class SharesService {
   }
 
   private async drive(token: string, url: string, init: RequestInit, what: string): Promise<Response> {
-    const res = await fetch(url, { ...init, headers: { Authorization: `Bearer ${token}`, ...(init.body && typeof init.body === 'string' && init.body.startsWith('{') ? { 'Content-Type': 'application/json' } : {}), ...(init.headers as Record<string, string>) } });
+    const res = await fetch(url, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(init.body && typeof init.body === 'string' && init.body.startsWith('{') ? { 'Content-Type': 'application/json' } : {}),
+        ...(init.headers as Record<string, string>),
+      },
+    });
     if (res.ok) return res;
     const msg = await res
       .json()
@@ -216,14 +276,35 @@ export class SharesService {
   /** HTML 을 구글 문서로(비공개로 새로 만들거나, 그 문서 내용을 바꾼다). */
   private async uploadDoc(token: string, fileId: string | null, title: string, html: string): Promise<{ id: string; url: string }> {
     if (fileId) {
-      const res = await this.drive(token, `${DRIVE_UPLOAD}/${encodeURIComponent(fileId)}?uploadType=media&fields=id,webViewLink`, { method: 'PATCH', headers: { 'Content-Type': 'text/html; charset=UTF-8' }, body: html }, '다시 올리');
+      const res = await this.drive(
+        token,
+        `${DRIVE_UPLOAD}/${encodeURIComponent(fileId)}?uploadType=media&fields=id,webViewLink`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'text/html; charset=UTF-8' },
+          body: html,
+        },
+        '다시 올리',
+      );
       const j = (await res.json()) as { id: string; webViewLink: string };
       return { id: j.id, url: j.webViewLink };
     }
     const boundary = 'ssamshare' + randomBytes(8).toString('hex');
-    const meta = { name: `쌤보드 공유 · ${title}`, mimeType: 'application/vnd.google-apps.document' };
+    const meta = {
+      name: `쌤보드 공유 · ${title}`,
+      mimeType: 'application/vnd.google-apps.document',
+    };
     const body = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${boundary}\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n${html}\r\n--${boundary}--`;
-    const res = await this.drive(token, `${DRIVE_UPLOAD}?uploadType=multipart&fields=id,webViewLink`, { method: 'POST', headers: { 'Content-Type': `multipart/related; boundary=${boundary}` }, body }, '공유 문서를 만들');
+    const res = await this.drive(
+      token,
+      `${DRIVE_UPLOAD}?uploadType=multipart&fields=id,webViewLink`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+        body,
+      },
+      '공유 문서를 만들',
+    );
     const file = (await res.json()) as { id: string; webViewLink: string };
     return { id: file.id, url: file.webViewLink };
   }

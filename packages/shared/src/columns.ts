@@ -44,9 +44,7 @@ const pad = (n: number) => String(n).padStart(2, '0');
 /** 날짜를 ISO 8601(YYYY-MM-DD)로 맞춘다. 월/일 순서가 모호한 형식은 받지 않는다. */
 export function parseDate(input: string): string | null {
   const s = input.trim();
-  let m =
-    /^(\d{4})[-./]\s?(\d{1,2})[-./]\s?(\d{1,2})\.?(?:[T\s].*)?$/.exec(s) ||
-    /^(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일(?:\s.*)?$/.exec(s);
+  let m = /^(\d{4})[-./]\s?(\d{1,2})[-./]\s?(\d{1,2})\.?(?:[T\s].*)?$/.exec(s) || /^(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일(?:\s.*)?$/.exec(s);
   if (!m) m = /^(\d{4})(\d{2})(\d{2})$/.exec(s);
   if (!m) return null;
   const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
@@ -119,18 +117,25 @@ export function inferColumnType(samples: unknown[]): ColumnType {
   return 'text';
 }
 
-export function nextColumnId(columns: Column[]): string {
+/**
+ * 새 열 id. 처음 만드는 표(fresh)는 c_1, c_2… 로, 있는 표에 더하는 열은 겹치지 않는 무작위 꼬리를 붙인다 —
+ * 지운 열의 번호를 새 열이 다시 쓰면, 그 번호를 기억하는 공유 링크·저장된 질의가 새 열(개인정보일 수 있음)을 옛 열로 착각한다(2026-11-28 코덱스 검토).
+ */
+export function nextColumnId(columns: Column[], fresh = false): string {
   let max = 0;
   for (const c of columns) {
-    const m = /^c_(\d+)$/.exec(c.id);
+    const m = /^c_(\d+)/.exec(c.id);
     if (m) max = Math.max(max, Number(m[1]));
   }
-  return `c_${max + 1}`;
+  if (fresh) return `c_${max + 1}`;
+  const tail = Array.from({ length: 6 }, () => '0123456789abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 36)]).join('');
+  return `c_${max + 1}_${tail}`;
 }
 
 /** 이름·타입 목록으로 고정 ID가 붙은 컬럼을 만든다. 이름이 비거나 겹치면 뒤에 번호를 붙인다. */
 export function buildColumns(defs: { name: string; type: ColumnType }[], existing: Column[] = []): Column[] {
   const out: Column[] = [...existing];
+  const fresh = existing.length === 0;
   const used = new Set(out.map((c) => c.name));
   const created: Column[] = [];
   defs.forEach((d, i) => {
@@ -138,7 +143,7 @@ export function buildColumns(defs: { name: string; type: ColumnType }[], existin
     let name = base;
     for (let n = 2; used.has(name); n++) name = `${base} ${n}`;
     used.add(name);
-    const col: Column = { id: nextColumnId(out), name, type: d.type };
+    const col: Column = { id: nextColumnId(out, fresh), name, type: d.type };
     out.push(col);
     created.push(col);
   });

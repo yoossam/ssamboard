@@ -1,5 +1,5 @@
 import { keepPreviousData, QueryClient, useQuery } from '@tanstack/react-query';
-import type { BoardDto, ConnectorDto, MenuItemDto, EventDto, NotificationDto, QueryResult, RowPage, SessionDto, SettingsDto, TableDto, TaskDto, TrashItem } from '@jarvis/shared';
+import type { BoardDto, CommandDto, ConnectorDto, MenuItemDto, EventDto, NotificationDto, QueryResult, RowPage, SessionDto, SettingsDto, TableDto, TaskDto, TrashItem } from '@jarvis/shared';
 import { api, ApiError } from './api';
 import { dayKey, zoneOffset } from './format';
 
@@ -27,6 +27,7 @@ export const keys = {
   connectors: ['connectors'] as const,
   trash: ['trash'] as const,
   menus: ['menus'] as const,
+  commands: ['commands'] as const,
 };
 
 /** 바뀐 것을 다시 읽는다. 이름을 주지 않으면 전부. */
@@ -38,13 +39,13 @@ export function refresh(...names: (keyof typeof keys | 'rows' | 'query')[]): Pro
 export const useBoard = () => useQuery({ queryKey: keys.board, queryFn: () => api.get<BoardDto>('/boards/current') });
 export const useTasks = () => useQuery({ queryKey: keys.tasks, queryFn: () => api.get<TaskDto[]>('/tasks') });
 
-/** 오늘부터 2주 동안의 일정. */
+/** 오늘부터 한 달 동안의 일정(블록마다 보여 줄 기간은 block.config.event_days 로 거른다). */
 export const useEvents = () =>
   useQuery({
     queryKey: keys.events,
     queryFn: () => {
       const from = new Date(`${dayKey(new Date())}T00:00:00${zoneOffset()}`);
-      const to = new Date(from.getTime() + 14 * 86_400_000);
+      const to = new Date(from.getTime() + 31 * 86_400_000);
       return api.get<EventDto[]>(`/events?from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}`);
     },
     refetchInterval: 5 * 60_000,
@@ -56,6 +57,8 @@ export const useSettings = () => useQuery({ queryKey: keys.settings, queryFn: ()
 export const useSessions = () => useQuery({ queryKey: keys.sessions, queryFn: () => api.get<SessionDto[]>('/sessions') });
 export const useConnectors = () => useQuery({ queryKey: keys.connectors, queryFn: () => api.get<ConnectorDto[]>('/connectors') });
 export const useMenus = () => useQuery({ queryKey: keys.menus, queryFn: () => api.get<MenuItemDto[]>('/menus') });
+/** 처리 결과함(승인 대기·처리한 것) */
+export const useCommands = () => useQuery({ queryKey: keys.commands, queryFn: () => api.get<CommandDto[]>('/ai/commands'), refetchInterval: 120_000 });
 export const useTrash = () => useQuery({ queryKey: keys.trash, queryFn: () => api.get<TrashItem[]>('/trash') });
 
 /** 표 하나. 표 목록에서 찾는다(목록이 스키마까지 담고 있다). */

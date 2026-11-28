@@ -13,6 +13,10 @@ import { AiController, HealthController, NotificationsController, SettingsContro
 import { UploadsService } from '../../api/src/uploads/uploads.service';
 import { DataController } from '../../api/src/data/data.controller';
 import { MenusController } from '../../api/src/menus/menus.controller';
+import { MemoryController } from '../../api/src/memory/memory.controller';
+import { MemoryService } from '../../api/src/memory/memory.service';
+import { FilesController } from '../../api/src/files/files.controller';
+import { FilesService } from '../../api/src/files/files.service';
 import { MenusService } from '../../api/src/menus/menus.service';
 import { SharesController } from '../../api/src/shares/shares.controller';
 import { SharesService } from '../../api/src/shares/shares.service';
@@ -71,14 +75,16 @@ export async function createLocalApp(db: LocalDb, who: LocalIdentity, opts: Loca
   // 시트·설문 연결은 서버 판 코드 그대로 — 구글 토큰만 브라우저 로그인 것(stub/google.ts)을 쓴다.
   const google = new GoogleService();
   const connectors = new ConnectorsService(anyDb, google as any, tables, notifications);
-  const commands = new CommandsService(anyDb, boards, items, tables, notifications, connectors);
-  const ai = new AiService(anyDb, llm, commands, boards, items, tables, notifications);
-  const auth = new AuthService();
-  // 파일로 표 만들기: 올린 파일은 이 탭의 메모리(shim/node-fs.ts)에 표를 만들 때까지만 둔다.
-  const uploads = new UploadsService(anyDb, llm, tables);
   const menus = new MenusService(anyDb, llm, tables);
   // 공유 링크: 서버가 없으니 구글 문서로(config.shareMode = 'drive')
   const shares = new SharesService(anyDb, items, tables, connectors);
+  const memory = new MemoryService(anyDb);
+  const files = new FilesService(anyDb);
+  const commands = new CommandsService(anyDb, boards, items, tables, notifications, connectors, menus, shares, memory, files);
+  const ai = new AiService(anyDb, llm, commands, boards, items, tables, notifications, menus, shares, memory, files);
+  const auth = new AuthService();
+  // 파일로 표 만들기: 올린 파일은 이 탭의 메모리(shim/node-fs.ts)에 표를 만들 때까지만 둔다.
+  const uploads = new UploadsService(anyDb, llm, tables);
 
   /** 매 요청마다 세션이 가리키는 사용자를 새로 읽는다(설정 변경·자료 받기로 사용자가 바뀌어도 맞게). */
   const authCtx = async (): Promise<AuthCtx> => {
@@ -158,6 +164,8 @@ export async function createLocalApp(db: LocalDb, who: LocalIdentity, opts: Loca
       new TrashController(anyDb),
       new ConnectorsController(connectors, google as any, auth as any, audit),
       new MenusController(menus),
+      new MemoryController(memory),
+      new FilesController(files),
       new SharesController(shares, audit),
     ],
     authCtx,

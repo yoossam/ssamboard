@@ -1,18 +1,111 @@
 import { useEffect, useRef, useState } from 'react';
 import { create } from 'zustand';
-import { COLUMN_TYPES, COLUMN_TYPE_LABEL, normalizeValue, type BlockDto, type ColumnType, type CommandDto, type PlanStepView, type TablePreview } from '@jarvis/shared';
+import {
+  MENU_PANELS,
+  COLUMN_TYPES,
+  COLUMN_TYPE_LABEL,
+  type ConversationDto,
+  type ConversationMessageDto,
+  normalizeValue,
+  type BlockDto,
+  type BoardDto,
+  type ColumnType,
+  type CommandDto,
+  type PlanStepView,
+  type TablePreview,
+} from '@jarvis/shared';
 import { BLOCK_ICON, Icon } from '../components/Icon';
 import { SafeText } from '../components/SafeText';
 import { Button, ButtonRow, compactInput, IconButton, inputClass, Notice, Tag, useIsPhone } from '../components/ui';
 import { api, errorMessage, streamAi } from '../lib/api';
-import { refresh, useBoard } from '../lib/data';
-import { droppedText, FILE_ACCEPT, filesFrom, googleLinksOnly, MAX_FILES, MAX_IMAGES, MAX_LINKS, readAttachedFile, shrinkImage, splitFiles, type AttachedFile, type AttachedImage, type AttachedLink } from '../lib/images';
-import { useApp } from '../lib/store';
+import { keys, queryClient, refresh, useBoard } from '../lib/data';
+import { blocksFor, showOnBoard } from '../lib/results';
+import { UNDO_SCOPE } from '../panels/Results';
+import {
+  droppedText,
+  FILE_ACCEPT,
+  filesFrom,
+  googleLinksOnly,
+  MAX_FILES,
+  MAX_IMAGES,
+  MAX_LINKS,
+  readAttachedFile,
+  shrinkImage,
+  splitFiles,
+  type AttachedFile,
+  type AttachedImage,
+  type AttachedLink,
+} from '../lib/images';
+import { useApp, type Panel } from '../lib/store';
+import { LOCAL_TRACK } from '../lib/edition';
 
 // 하나뿐인 AI 창(ONE-2). 대화와 실행을 모두 맡는다.
 // 데이터를 바꾸는 일은 항상 계획 → 승인 → 반영 순서를 따르고, 승인한 뒤에도 되돌릴 수 있다(ONE-5·6).
 
-export type TableEdit = { name: string; columns: { name: string; type: ColumnType }[] };
+/** AI 가 연 화면(open_screen). AI 창이 가운데 창이면 닫고 연다 — 옆 창이면 그대로 둔다. */
+function openScreen(target: string, id?: string): void {
+  const app = useApp.getState();
+  const panel: Panel | null =
+    target === 'table' && id
+      ? { kind: 'table', tableId: id }
+      : target === 'block' && id
+        ? { kind: 'block', blockId: id }
+        : target === 'share' && id
+          ? { kind: 'share', blockId: id }
+          : (MENU_PANELS as readonly string[]).includes(target)
+            ? target === 'settings'
+              ? { kind: 'settings' }
+              : ({ kind: target } as Panel)
+            : null;
+  if (!panel) return;
+  if (app.aiLayout === 'modal') app.closeAi();
+  app.open(panel);
+}
+
+/** AI 가 고친 파일 내려받기 — 두 트랙 모두 JSON(base64)으로 받아 이 브라우저에서 파일로 저장 */
+export async function downloadFile(id: string): Promise<void> {
+  try {
+    const f = await api.get<{ name: string; mime: string; data: string }>(`/files/${id}`);
+    const bytes = Uint8Array.from(atob(f.data), (c) => c.charCodeAt(0));
+    const url = URL.createObjectURL(new Blob([bytes], { type: f.mime || 'application/octet-stream' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = f.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  } catch (e) {
+    useApp.getState().toast(errorMessage(e), 'error');
+  }
+}
+
+/** 계획 한 단계의 설명. 여러 줄(파일 고치기의 바뀌는 곳)이면 처음 몇 줄과 '모두 보기' — 승인 전에 빠짐없이 볼 수 있게(코덱스·제미나이 검토) */
+export function StepDetail({ detail }: { detail: string }) {
+  const [all, setAll] = useState(false);
+  const lines = detail.split('\n');
+  if (lines.length === 1) return <p className="truncate text-xs text-sub">{detail}</p>;
+  const shown = all ? lines : lines.slice(0, 5);
+  return (
+    <div className="text-xs text-sub">
+      {shown.map((l, i) => (
+        <p key={i} className={i === 0 ? 'font-medium' : 'break-all'}>
+          {l}
+        </p>
+      ))}
+      {lines.length > 5 && (
+        <button type="button" className="mt-0.5 underline" onClick={() => setAll(!all)}>
+          {all ? '접기' : `바뀌는 곳 모두 보기(${lines.length - 1}줄)`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+export type TableEdit = {
+  name: string;
+  columns: { name: string; type: ColumnType }[];
+};
 
 interface UserMsg {
   id: number;
@@ -47,20 +140,86 @@ interface AiState {
   stop: () => void;
   patch: (id: number, change: Partial<AiMsg>) => void;
   reset: () => void;
+  /** '새 대화' 단추 — 화면을 비우고 다음에 이어 열 대화도 잊는다(reset 은 잠글 때도 불려 이어 열 대화는 남긴다) */
+  newConversation: () => void;
+  /** 지난 대화를 열어 이어 간다(기억, 2026-11-28) */
+  load: (conversationId: string) => Promise<void>;
 }
 
 let seq = 0;
+/** 마지막 대화 — 새로 고쳐도 이어 연다 */
+const LAST_KEY = 'ssamboard.ai.conversation';
+const remember = (id: string | undefined) => {
+  try {
+    if (id) localStorage.setItem(LAST_KEY, id);
+    else localStorage.removeItem(LAST_KEY);
+  } catch {
+    /* 저장소를 못 쓰면 이 탭에서만 */
+  }
+};
+/** 로그아웃 때 — 다음 사람이 이어 열지 않게 */
+export const forgetLastConversation = () => remember(undefined);
+export const lastConversation = (): string | null => {
+  try {
+    return localStorage.getItem(LAST_KEY);
+  } catch {
+    return null;
+  }
+};
 
 export const useAi = create<AiState>()((set, get) => ({
   messages: [],
   conversationId: undefined,
   busy: false,
   abort: null,
-  patch: (id, change) => set((s) => ({ messages: s.messages.map((m) => (m.id === id && m.role === 'assistant' ? { ...m, ...change } : m)) })),
+  patch: (id, change) =>
+    set((s) => ({
+      messages: s.messages.map((m) => (m.id === id && m.role === 'assistant' ? { ...m, ...change } : m)),
+    })),
   stop: () => get().abort?.abort(),
   reset: () => {
     get().abort?.abort();
     set({ messages: [], conversationId: undefined, busy: false, abort: null });
+  },
+  newConversation: () => {
+    get().reset();
+    remember(undefined);
+  },
+  load: async (conversationId) => {
+    if (get().busy) return;
+    try {
+      const list = await api.get<ConversationMessageDto[]>(`/ai/conversations/${conversationId}/messages`);
+      const plans = new Map<string, CommandDto>();
+      await Promise.all(
+        list
+          .filter((m) => m.command_id)
+          .map(async (m) => {
+            const c = await api.get<CommandDto>(`/ai/commands/${m.command_id}`).catch(() => null);
+            if (c) plans.set(m.command_id!, c);
+          }),
+      );
+      const messages: Msg[] = list.map((m) =>
+        m.role === 'user'
+          ? { id: ++seq, role: 'user', text: m.content, data: '', blocks: [] }
+          : {
+              id: ++seq,
+              role: 'assistant',
+              text: m.content,
+              tools: [],
+              streaming: false,
+              edits: {},
+              plan: m.command_id ? plans.get(m.command_id) : undefined,
+            },
+      );
+      // 불러오는 사이 새 말을 보냈으면 덮어쓰지 않는다(메뉴의 'AI 에게 시키기'처럼 창을 열자마자 보내는 경우)
+      if (get().busy || (get().messages.length > 0 && get().conversationId !== conversationId)) return;
+      remember(conversationId);
+      set({ messages, conversationId });
+    } catch {
+      // 지운 대화 등 — 새 대화로
+      remember(undefined);
+      set({ messages: [], conversationId: undefined });
+    }
   },
   send: async (text, data, blockIds, blockTitles, images = [], files = [], links = []) => {
     if (get().busy || (!text.trim() && images.length === 0 && files.length === 0 && links.length === 0)) return;
@@ -70,7 +229,26 @@ export const useAi = create<AiState>()((set, get) => ({
     set((s) => ({
       busy: true,
       abort,
-      messages: [...s.messages, { id: askId, role: 'user', text: text.trim(), data, blocks: blockTitles, images: images.map((img) => img.preview), files: [...files.map((f) => f.name), ...links.map((l) => l.label)] }, { id: replyId, role: 'assistant', text: '', tools: [], streaming: true, edits: {} }],
+      messages: [
+        ...s.messages,
+        {
+          id: askId,
+          role: 'user',
+          text: text.trim(),
+          data,
+          blocks: blockTitles,
+          images: images.map((img) => img.preview),
+          files: [...files.map((f) => f.name), ...links.map((l) => l.label)],
+        },
+        {
+          id: replyId,
+          role: 'assistant',
+          text: '',
+          tools: [],
+          streaming: true,
+          edits: {},
+        },
+      ],
     }));
     const patch = get().patch;
     const current = () => get().messages.find((m): m is AiMsg => m.id === replyId && m.role === 'assistant');
@@ -81,7 +259,13 @@ export const useAi = create<AiState>()((set, get) => ({
           data: data || undefined,
           context_block_ids: blockIds,
           conversation_id: get().conversationId,
-          images: images.length > 0 ? images.map(({ media_type, data: b64 }) => ({ media_type, data: b64 })) : undefined,
+          images:
+            images.length > 0
+              ? images.map(({ media_type, data: b64 }) => ({
+                  media_type,
+                  data: b64,
+                }))
+              : undefined,
           files: files.length > 0 ? files.map(({ name, data: b64 }) => ({ name, data: b64 })) : undefined,
           links: links.length > 0 ? links.map((l) => l.url) : undefined,
         },
@@ -89,10 +273,17 @@ export const useAi = create<AiState>()((set, get) => ({
           const msg = current();
           if (!msg) return;
           if (event.type === 'text') patch(replyId, { text: msg.text + event.delta });
-          else if (event.type === 'tool') patch(replyId, { tools: msg.tools.includes(event.label) ? msg.tools : [...msg.tools, event.label] });
+          else if (event.type === 'tool')
+            patch(replyId, {
+              tools: msg.tools.includes(event.label) ? msg.tools : [...msg.tools, event.label],
+            });
           else if (event.type === 'plan') patch(replyId, { plan: event.command });
           else if (event.type === 'error') patch(replyId, { error: event.message });
-          else if (event.type === 'done') set({ conversationId: event.conversation_id });
+          else if (event.type === 'open') openScreen(event.target, event.id);
+          else if (event.type === 'done') {
+            set({ conversationId: event.conversation_id });
+            remember(event.conversation_id);
+          }
         },
         abort.signal,
       );
@@ -119,7 +310,13 @@ const TOOL_ICON: Record<string, string> = {
   add_rows: 'table',
   mark_notifications: 'bell',
 };
-const STATUS_LABEL: Record<CommandDto['status'], string> = { proposed: '승인 전', applied: '반영됨', undone: '되돌림', cancelled: '취소됨' };
+const STATUS_LABEL: Record<CommandDto['status'], string> = {
+  proposed: '승인 전',
+  applying: '마무리 중',
+  applied: '반영됨',
+  undone: '되돌림',
+  cancelled: '취소됨',
+};
 
 const EXAMPLES = ['내일 3시 거래처 미팅 추가', '오늘 온 알림 중 급한 것만', '이번 주 일정과 마감 정리해 줘', '표를 월별로 요약해서 새 블록으로'];
 
@@ -134,7 +331,11 @@ export function PreviewEditor({ preview, edit, onChange, locked }: { preview: Ta
     const cells = preview.rows.map((r) => r[i]).filter((v) => v !== null && v !== '');
     return cells.length === 0 ? 0 : cells.filter((v) => !normalizeValue(v, type).ok).length / cells.length;
   };
-  const setColumn = (i: number, change: Partial<{ name: string; type: ColumnType }>) => onChange({ ...value, columns: value.columns.map((c, j) => (j === i ? { ...c, ...change } : c)) });
+  const setColumn = (i: number, change: Partial<{ name: string; type: ColumnType }>) =>
+    onChange({
+      ...value,
+      columns: value.columns.map((c, j) => (j === i ? { ...c, ...change } : c)),
+    });
   // 실패가 20%를 넘는 컬럼이 보이면 모든 컬럼에 같은 높이의 줄을 두어 아래 행이 어긋나지 않게 한다(LLM-12).
   const warn = (c: { i: number; type: ColumnType }) => c.type !== 'text' && failRate(c.i, c.type) > 0.2;
   const anyWarn = !locked && cols.some(warn);
@@ -156,7 +357,12 @@ export function PreviewEditor({ preview, edit, onChange, locked }: { preview: Ta
           </span>
         )}
       </div>
-      <div className="mt-1 grid gap-2" style={{ gridTemplateColumns: `repeat(${cols.length}, minmax(0, 1fr))` }}>
+      <div
+        className="mt-1 grid gap-2"
+        style={{
+          gridTemplateColumns: `repeat(${cols.length}, minmax(0, 1fr))`,
+        }}
+      >
         {cols.map((c) => {
           const rate = failRate(c.i, c.type);
           return (
@@ -181,7 +387,11 @@ export function PreviewEditor({ preview, edit, onChange, locked }: { preview: Ta
                 const raw = r[c.i];
                 const bad = raw !== null && raw !== '' && !normalizeValue(raw, c.type).ok;
                 return (
-                  <p key={k} title={bad ? '이 타입으로 바꾸지 못하는 값입니다. 저장하면 값은 비우고 원문은 남깁니다.' : undefined} className={`h-8 truncate border-b border-rule px-2 text-xs leading-8 ${bad ? 'bg-dangertint text-danger' : ''}`}>
+                  <p
+                    key={k}
+                    title={bad ? '이 타입으로 바꾸지 못하는 값입니다. 저장하면 값은 비우고 원문은 남깁니다.' : undefined}
+                    className={`h-8 truncate border-b border-rule px-2 text-xs leading-8 ${bad ? 'bg-dangertint text-danger' : ''}`}
+                  >
                     {raw ?? ''}
                   </p>
                 );
@@ -210,7 +420,12 @@ function PlanCard({ msg }: { msg: AiMsg }) {
       const next = await api.post<CommandDto>(`/ai/commands/${plan.id}/${action}`, action === 'apply' ? { edits: msg.edits } : {});
       patch(msg.id, { plan: next });
       if (action !== 'cancel') await refresh();
-      if (action === 'apply') toast('반영했습니다');
+      // 바뀐 곳을 보드에서 잠깐 강조한다(옆 패널이면 바로 보이고, 겹친 창이면 [보드에서 보기]로 — UX 토론 J)
+      if (action === 'apply') {
+        const n = blocksFor(next, queryClient.getQueryData<BoardDto>(keys.board)?.blocks ?? []).length;
+        if (n > 0) useApp.getState().flash(blocksFor(next, queryClient.getQueryData<BoardDto>(keys.board)?.blocks ?? []));
+        toast(n > 0 ? `반영했습니다 · 바뀐 블록 ${n}개` : '반영했습니다');
+      }
       if (action === 'undo') toast((next.skipped?.length ?? 0) > 0 ? `되돌렸습니다 · ${next.skipped!.length}건은 건너뜀` : '되돌렸습니다');
     } catch (e) {
       toast(errorMessage(e), 'error');
@@ -234,11 +449,20 @@ function PlanCard({ msg }: { msg: AiMsg }) {
             <Icon name={TOOL_ICON[step.tool] ?? 'sparkle'} className={step.tool === 'delete_block' ? 'text-danger' : 'text-accent'} />
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-bold">{step.title}</p>
-              <p className="truncate text-xs text-sub">{step.detail}</p>
+              <StepDetail detail={step.detail} />
             </div>
           </div>
           {step.preview && (
-            <PreviewEditor preview={step.preview} edit={msg.edits[String(step.index)]} locked={plan.status !== 'proposed' || working} onChange={(edit) => patch(msg.id, { edits: { ...msg.edits, [String(step.index)]: edit } })} />
+            <PreviewEditor
+              preview={step.preview}
+              edit={msg.edits[String(step.index)]}
+              locked={plan.status !== 'proposed' || working}
+              onChange={(edit) =>
+                patch(msg.id, {
+                  edits: { ...msg.edits, [String(step.index)]: edit },
+                })
+              }
+            />
           )}
         </div>
       ))}
@@ -254,24 +478,43 @@ function PlanCard({ msg }: { msg: AiMsg }) {
                 {confirmDelete ? '삭제 포함 승인' : '승인'}
               </Button>
             </ButtonRow>
-            <p className="text-center text-xs text-sub">승인한 뒤에도 되돌릴 수 있습니다</p>
+            <p className="text-center text-xs text-sub">승인한 뒤에도 되돌릴 수 있습니다 · 결과는 위쪽 [처리 결과]에도 남습니다</p>
           </>
         )}
+        {plan.status === 'applied' && (plan.files?.length ?? 0) > 0 && (
+          <div className="space-y-1.5 rounded-[10px] border border-accent bg-tint p-2">
+            {plan.files!.map((f) => (
+              <Button key={f.id} icon="download" tone="primary" className="w-full" onClick={() => void downloadFile(f.id)}>
+                내려받기 · {f.name}
+              </Button>
+            ))}
+            <p className="text-center text-xs text-sub">
+              원본은 그대로입니다. 고친 파일은 하루 동안 내려받을 수 있습니다
+              {LOCAL_TRACK ? '(새로 고치면 사라짐)' : ''}.
+            </p>
+          </div>
+        )}
         {plan.status === 'applied' && (
-          <ButtonRow>
-            <Button icon="undo" disabled={working} onClick={() => run('undo')}>
-              되돌리기
-            </Button>
-            <Button icon="grid" onClick={closeAi}>
-              보드 보기
-            </Button>
-          </ButtonRow>
+          <>
+            <ButtonRow>
+              <Button icon="undo" disabled={working} onClick={() => run('undo')}>
+                되돌리기
+              </Button>
+              <Button
+                icon="grid"
+                onClick={() => {
+                  // 바뀐 블록까지 데려가 강조한다(UX 토론 J). 닫기는 showOnBoard 한 곳에서(옆 패널은 둔다)
+                  showOnBoard(plan);
+                }}
+              >
+                보드에서 보기
+              </Button>
+            </ButtonRow>
+            <p className="text-xs leading-relaxed text-sub">{UNDO_SCOPE}</p>
+          </>
         )}
-        {plan.status === 'undone' && (plan.skipped?.length ?? 0) > 0 && (
-          <Notice>
-            적용한 뒤에 직접 고친 항목은 덮어쓰지 않고 건너뛰었습니다: {plan.skipped!.join(', ')}
-          </Notice>
-        )}
+        {(plan.status === 'applied' || plan.status === 'applying') && (plan.skipped?.length ?? 0) > 0 && <Notice tone="danger">하지 못한 것: {plan.skipped!.join(', ')}</Notice>}
+        {plan.status === 'undone' && (plan.skipped?.length ?? 0) > 0 && <Notice>적용한 뒤에 직접 고친 항목은 덮어쓰지 않고 건너뛰었습니다: {plan.skipped!.join(', ')}</Notice>}
         {plan.status === 'undone' && (plan.skipped?.length ?? 0) === 0 && <p className="text-center text-xs text-sub">모두 되돌렸습니다</p>}
         {plan.status === 'cancelled' && <p className="text-center text-xs text-sub">계획을 취소했습니다. 반영된 것은 없습니다.</p>}
       </div>
@@ -328,6 +571,57 @@ function Message({ msg }: { msg: Msg }) {
     </div>
   );
 }
+
+/** 지난 대화 목록(기억) — 골라서 이어 간다 */
+function PastConversations() {
+  const [open, setOpen] = useState(false);
+  const [list, setList] = useState<ConversationDto[] | null>(null);
+  const load = useAi((s) => s.load);
+  const current = useAi((s) => s.conversationId);
+  const toggle = async () => {
+    if (!open) setList(await api.get<ConversationDto[]>('/ai/conversations').catch(() => []));
+    setOpen(!open);
+  };
+  return (
+    <div className="relative">
+      <IconButton icon="archive" label="지난 대화" active={open} onClick={() => void toggle()} />
+      {open && (
+        <div className="absolute top-11 right-0 z-10 max-h-80 w-72 overflow-y-auto rounded-xl border bg-card p-1 shadow-lg">
+          {list === null ? (
+            <p className="p-3 text-sm text-sub">불러오는 중…</p>
+          ) : list.length === 0 ? (
+            <p className="p-3 text-sm text-sub">지난 대화가 없습니다</p>
+          ) : (
+            list.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  void load(c.id);
+                }}
+                className={`block w-full rounded-lg px-3 py-2 text-left hover:bg-tint ${c.id === current ? 'bg-tint' : ''}`}
+              >
+                <span className="block truncate text-sm">{c.title}</span>
+                <span className="text-xs text-sub">
+                  {shortWhenOf(c.updated_at)}
+                  {c.summarized ? ' · 앞부분 요약됨' : ''}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+const shortWhenOf = (iso: string) =>
+  new Intl.DateTimeFormat('ko-KR', {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(iso));
 
 function Composer({ blocks }: { blocks: BlockDto[] }) {
   const send = useAi((s) => s.send);
@@ -422,7 +716,15 @@ function Composer({ blocks }: { blocks: BlockDto[] }) {
     setFiles([]);
     setLinks([]);
     setImageError('');
-    await send(body, pasted, chosen.map((b) => b.id), chosen.map((b) => b.title), sending, sendingFiles, sendingLinks);
+    await send(
+      body,
+      pasted,
+      chosen.map((b) => b.id),
+      chosen.map((b) => b.title),
+      sending,
+      sendingFiles,
+      sendingLinks,
+    );
   };
 
   return (
@@ -446,7 +748,12 @@ function Composer({ blocks }: { blocks: BlockDto[] }) {
             <span key={l.url} title={l.url} className="flex h-8 max-w-full items-center gap-1 rounded-lg border bg-card pr-1 pl-2 text-sm">
               <Icon name="link" size={15} className="shrink-0 text-accent" />
               <span className="max-w-[16rem] truncate">{l.label} 링크</span>
-              <button type="button" aria-label={`링크 ${i + 1} 빼기`} onClick={() => setLinks((now) => now.filter((x) => x.url !== l.url))} className="flex size-6 items-center justify-center rounded-md text-sub hover:bg-tint hover:text-ink">
+              <button
+                type="button"
+                aria-label={`링크 ${i + 1} 빼기`}
+                onClick={() => setLinks((now) => now.filter((x) => x.url !== l.url))}
+                className="flex size-6 items-center justify-center rounded-md text-sub hover:bg-tint hover:text-ink"
+              >
                 <Icon name="close" size={14} />
               </button>
             </span>
@@ -455,7 +762,12 @@ function Composer({ blocks }: { blocks: BlockDto[] }) {
             <span key={f.id} className="flex h-8 max-w-full items-center gap-1 rounded-lg border bg-card pr-1 pl-2 text-sm">
               <Icon name="clip" size={15} className="shrink-0 text-sub" />
               <span className="max-w-[16rem] truncate">{f.name}</span>
-              <button type="button" aria-label={`파일 ${i + 1} 빼기`} onClick={() => setFiles((now) => now.filter((x) => x.id !== f.id))} className="flex size-6 items-center justify-center rounded-md text-sub hover:bg-tint hover:text-ink">
+              <button
+                type="button"
+                aria-label={`파일 ${i + 1} 빼기`}
+                onClick={() => setFiles((now) => now.filter((x) => x.id !== f.id))}
+                className="flex size-6 items-center justify-center rounded-md text-sub hover:bg-tint hover:text-ink"
+              >
                 <Icon name="close" size={14} />
               </button>
             </span>
@@ -498,7 +810,13 @@ function Composer({ blocks }: { blocks: BlockDto[] }) {
       {picked.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-1.5">
           {picked.map((b) => (
-            <button key={b.id} type="button" onClick={() => toggleSelected(b.id)} title="컨텍스트에서 빼기" className="flex h-7 max-w-full items-center gap-1 rounded-md bg-tint pr-1 pl-2 text-xs font-medium text-accent">
+            <button
+              key={b.id}
+              type="button"
+              onClick={() => toggleSelected(b.id)}
+              title="컨텍스트에서 빼기"
+              className="flex h-7 max-w-full items-center gap-1 rounded-md bg-tint pr-1 pl-2 text-xs font-medium text-accent"
+            >
               <span className="truncate">{b.title}</span>
               <Icon name="close" size={14} />
             </button>
@@ -519,7 +837,12 @@ function Composer({ blocks }: { blocks: BlockDto[] }) {
       )}
       <div className="flex items-end gap-1.5">
         <IconButton icon="paste" label={showData ? '자료 닫기' : '자료 붙여넣기'} active={showData || !!data} onClick={() => setShowData(!showData)} />
-        <IconButton icon="clip" label="파일·이미지 첨부(PDF·한글·워드·엑셀·사진). 구글 문서·시트 링크는 붙여 넣으면 저절로 첨부" active={images.length + files.length + links.length > 0} onClick={() => fileInput.current?.click()} />
+        <IconButton
+          icon="clip"
+          label="파일·이미지 첨부(PDF·한글·워드·엑셀·사진). 구글 문서·시트 링크는 붙여 넣으면 저절로 첨부"
+          active={images.length + files.length + links.length > 0}
+          onClick={() => fileInput.current?.click()}
+        />
         <input
           ref={fileInput}
           type="file"
@@ -556,7 +879,9 @@ function Composer({ blocks }: { blocks: BlockDto[] }) {
           }}
           rows={Math.min(4, Math.max(1, text.split('\n').length))}
           maxLength={4000}
-          placeholder={images.length + files.length + links.length > 0 ? '첨부로 무엇을 할까요? (비워 두면 내용을 정리해 줘요)' : hasMessages ? '이어서 요청하기' : '무엇을 도와드릴까요?  @로 블록 지정'}
+          placeholder={
+            images.length + files.length + links.length > 0 ? '첨부로 무엇을 할까요? (비워 두면 내용을 정리해 줘요)' : hasMessages ? '이어서 요청하기' : '무엇을 도와드릴까요?  @로 블록 지정'
+          }
           aria-label="AI에게 요청"
           className="min-h-11 min-w-0 flex-1 resize-none rounded-[10px] border border-field bg-card px-3 py-2.5 text-sm outline-none focus:border-accent"
         />
@@ -565,7 +890,14 @@ function Composer({ blocks }: { blocks: BlockDto[] }) {
             <Icon name="close" size={18} />
           </button>
         ) : (
-          <button type="button" aria-label="보내기" title="보내기" disabled={(!text.trim() && images.length === 0 && files.length === 0 && links.length === 0) || shrinking} onClick={() => void submit()} className="flex size-11 shrink-0 items-center justify-center rounded-full bg-accent text-white disabled:opacity-40">
+          <button
+            type="button"
+            aria-label="보내기"
+            title="보내기"
+            disabled={(!text.trim() && images.length === 0 && files.length === 0 && links.length === 0) || shrinking}
+            onClick={() => void submit()}
+            className="flex size-11 shrink-0 items-center justify-center rounded-full bg-accent text-white disabled:opacity-40"
+          >
             <Icon name="send" size={18} />
           </button>
         )}
@@ -580,7 +912,6 @@ export function AiWindow() {
   const setLayout = useApp((s) => s.setAiLayout);
   const close = useApp((s) => s.closeAi);
   const messages = useAi((s) => s.messages);
-  const reset = useAi((s) => s.reset);
   const { data: board } = useBoard();
   const scroller = useRef<HTMLDivElement>(null);
   const panel = !phone && layout === 'panel';
@@ -588,6 +919,12 @@ export function AiWindow() {
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight });
   }, [messages]);
+  // 창을 처음 열면 마지막 대화를 이어 연다(새로 고쳐도 기억)
+  useEffect(() => {
+    const st = useAi.getState();
+    const last = lastConversation();
+    if (st.messages.length === 0 && !st.conversationId && last && !useApp.getState().aiDraft) void st.load(last);
+  }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && useApp.getState().panels.length === 0 && close();
     window.addEventListener('keydown', onKey);
@@ -610,7 +947,8 @@ export function AiWindow() {
       <header className="flex h-14 shrink-0 items-center gap-1 border-b border-rule pr-1.5 pl-4">
         <Icon name="sparkle" className="text-accent" />
         <h2 className="ml-1 min-w-0 flex-1 truncate text-base font-bold">AI</h2>
-        {messages.length > 0 && <IconButton icon="refresh" label="새 대화" onClick={reset} />}
+        <PastConversations />
+        {messages.length > 0 && <IconButton icon="plus" label="새 대화" onClick={() => useAi.getState().newConversation()} />}
         {!phone && <IconButton icon={panel ? 'modal' : 'panel'} label={panel ? '가운데 창으로 보기' : '옆 패널로 보기'} onClick={() => setLayout(panel ? 'modal' : 'panel')} />}
         <IconButton icon="close" label="닫기" onClick={close} />
       </header>

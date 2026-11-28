@@ -146,12 +146,12 @@ const zipB64 = async (files: Record<string, string>) => {
 const b64 = (s: string) => Buffer.from(s).toString('base64');
 
 describe('AI 창 첨부 파일', () => {
-  it('PDF 는 문서 블록으로, 글·워드·한글(HWPX)·파워포인트는 글로 바꾼다', async () => {
+  it('PDF 는 문서 블록으로, 글·워드·파워포인트는 글로, 엑셀·한글(HWPX)은 고칠 수 있게 원본으로 넘긴다', async () => {
     const pdf = b64('%PDF-1.4 fake');
     const docx = await zipB64({ 'word/document.xml': '<w:document><w:body><w:p><w:r><w:t>가정통신문</w:t></w:r></w:p><w:p><w:r><w:t xml:space="preserve">12월 3일 &amp; 현장체험</w:t></w:r></w:p></w:body></w:document>' });
     const hwpx = await zipB64({ 'Contents/section0.xml': '<hs:sec><hp:p><hp:run><hp:t>학부모 상담 안내</hp:t></hp:run></hp:p></hs:sec>' });
     const pptx = await zipB64({ 'ppt/slides/slide1.xml': '<p:sld><a:p><a:r><a:t>1학기 계획</a:t></a:r></a:p></p:sld>' });
-    const { pdfs, texts } = await readAttachments([
+    const { pdfs, texts, editable } = await readAttachments([
       { name: '공문.pdf', data: pdf },
       { name: '메모.txt', data: b64('준비물: 리코더') },
       { name: '안내.docx', data: docx },
@@ -159,7 +159,8 @@ describe('AI 창 첨부 파일', () => {
       { name: '계획.pptx', data: pptx },
     ]);
     assert.deepEqual(pdfs, [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdf }, title: '공문.pdf' }]);
-    assert.deepEqual(texts.map((t) => t.text), ['준비물: 리코더', '가정통신문\n12월 3일 & 현장체험', '학부모 상담 안내', '[슬라이드 1]\n1학기 계획']);
+    assert.deepEqual(texts.map((t) => t.text), ['준비물: 리코더', '가정통신문\n12월 3일 & 현장체험', '[슬라이드 1]\n1학기 계획']);
+    assert.deepEqual(editable.map((f) => [f.name, f.ext]), [['상담.hwpx', '.hwpx']]);
   });
   it('읽을 수 없는 형식·가짜 PDF·너무 많은 파일은 까닭과 함께 거절한다', async () => {
     await assert.rejects(readAttachments([{ name: '공문.hwp', data: b64('x') }]), /PDF 나 HWPX/);

@@ -1,11 +1,26 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { memoColor, PRIORITY_LABEL, type BlockDto, type Column, type EventDto, type NotificationDto, type QueryResult, type TaskDto } from '@jarvis/shared';
+import {
+  eventDaysOf,
+  EVENT_DAYS_LABEL,
+  memoColor,
+  notiShowOf,
+  PRIORITY_LABEL,
+  TASK_FILTER_LABEL,
+  taskFilterOf,
+  type BlockDto,
+  type Column,
+  type EventDto,
+  type NotificationDto,
+  type QueryResult,
+  type TableDto,
+  type TaskDto,
+} from '@jarvis/shared';
 import { Icon } from '../components/Icon';
 import { SafeText } from '../components/SafeText';
 import { CountBadge, Empty, IconButton, Tag, useSize } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
 import { keys, queryClient, refresh, useEvents, useNotifications, useQueryResult, useRows, useTable, useTasks } from '../lib/data';
-import { ago, cellText, dayKey, dueLabel, shortWhen, timeLabel } from '../lib/format';
+import { ago, cellText, dayKey, dueLabel, localInputToIso, shortWhen, timeLabel, zoneOffset } from '../lib/format';
 import { useApp } from '../lib/store';
 import { ViewBody } from './view';
 
@@ -86,20 +101,41 @@ export async function toggleTask(t: TaskDto): Promise<void> {
   }
 }
 
-function TasksBody() {
-  const { data = [], isLoading } = useTasks();
+/** 블록 설정(할 일 보기 방식)대로 거른다 — 마감이 지난 것도 '오늘까지'에 든다 */
+function filterTasks(tasks: TaskDto[], block: BlockDto): TaskDto[] {
+  const f = taskFilterOf(block.config);
+  if (f === 'all') return tasks;
+  const open = tasks.filter((t) => t.status === 'open');
+  if (f === 'open') return open;
+  const limit = new Date(`${dayKey(new Date())}T00:00:00${zoneOffset()}`).getTime() + (f === 'today' ? 1 : 7) * 86_400_000;
+  return open.filter((t) => t.due_at && new Date(t.due_at).getTime() < limit);
+}
+function filterEvents(events: EventDto[], block: BlockDto): EventDto[] {
+  const until = new Date(`${dayKey(new Date())}T00:00:00${zoneOffset()}`).getTime() + eventDaysOf(block.config) * 86_400_000;
+  return events.filter((e) => new Date(e.start_at).getTime() < until);
+}
+function filterNotis(list: NotificationDto[], block: BlockDto): NotificationDto[] {
+  return notiShowOf(block.config) === 'unread' ? list.filter((n) => n.status === 'unread') : list;
+}
+
+function TasksBody({ block }: { block: BlockDto }) {
+  const { data: all = [], isLoading } = useTasks();
+  const data = filterTasks(all, block);
   const open = useApp((s) => s.open);
+  const f = taskFilterOf(block.config);
   return (
     <PagedList
       items={data}
-      empty={isLoading ? '불러오는 중입니다' : '할 일이 없습니다'}
+      empty={isLoading ? '불러오는 중입니다' : f === 'all' || f === 'open' ? '할 일이 없습니다' : `${TASK_FILTER_LABEL[f]} 할 일이 없습니다`}
       action={<FooterButton icon="plus" label="추가" onClick={() => open({ kind: 'task' })} />}
       render={(t) => {
         const done = t.status === 'done';
         return (
           <li key={t.id} className={`${rowBase} pr-4 pl-1.5`}>
             <button type="button" aria-label={done ? '다시 열기' : '완료'} onClick={() => toggleTask(t)} className="flex size-11 shrink-0 items-center justify-center">
-              <span className={`flex size-5 items-center justify-center rounded-md border-2 ${done ? 'border-accent bg-accent text-white' : 'border-field'}`}>{done && <Icon name="check" size={13} />}</span>
+              <span className={`flex size-5 items-center justify-center rounded-md border-2 ${done ? 'border-accent bg-accent text-white' : 'border-field'}`}>
+                {done && <Icon name="check" size={13} />}
+              </span>
             </button>
             <button type="button" onClick={() => open({ kind: 'task', taskId: t.id })} className={`min-w-0 flex-1 truncate text-left ${done ? 'text-sub line-through' : ''}`}>
               {t.title}
@@ -121,13 +157,15 @@ function TasksBody() {
 const isToday = (e: EventDto) => dayKey(e.start_at) === dayKey(new Date());
 const eventWhen = (e: EventDto) => (isToday(e) ? timeLabel(e.start_at) : shortWhen(e.start_at));
 
-function EventsBody() {
-  const { data = [], isLoading } = useEvents();
+function EventsBody({ block }: { block: BlockDto }) {
+  const { data: all = [], isLoading } = useEvents();
+  const data = filterEvents(all, block);
   const open = useApp((s) => s.open);
+  const days = eventDaysOf(block.config);
   return (
     <PagedList
       items={data}
-      empty={isLoading ? '불러오는 중입니다' : '앞으로 2주 동안 일정이 없습니다'}
+      empty={isLoading ? '불러오는 중입니다' : days === 1 ? '오늘 일정이 없습니다' : `앞으로 ${EVENT_DAYS_LABEL[days]} 동안 일정이 없습니다`}
       action={<FooterButton icon="plus" label="추가" onClick={() => open({ kind: 'event' })} />}
       render={(e) => (
         <li key={e.id} className={rowClass}>
@@ -158,10 +196,11 @@ export async function readAll(): Promise<void> {
   void refresh('notifications');
 }
 
-function NotificationsBody() {
-  const { data = [], isLoading } = useNotifications();
+function NotificationsBody({ block }: { block: BlockDto }) {
+  const { data: all = [], isLoading } = useNotifications();
+  const data = filterNotis(all, block);
   const open = useApp((s) => s.open);
-  const unread = data.filter((n) => n.status === 'unread').length;
+  const unread = all.filter((n) => n.status === 'unread').length;
   return (
     <PagedList
       items={data}
@@ -198,7 +237,10 @@ function useColumnWindow<T>(columns: T[], width: number) {
   return {
     visible: columns.slice(first, first + max),
     // 열 넘김 단추가 있으면 머리글과 행이 똑같이 그 자리를 비워 두어 열이 어긋나지 않는다.
-    template: { gridTemplateColumns: `repeat(${Math.min(max, columns.length) || 1}, minmax(0, 1fr))`, paddingRight: columns.length > max ? NAV_WIDTH : 0 },
+    template: {
+      gridTemplateColumns: `repeat(${Math.min(max, columns.length) || 1}, minmax(0, 1fr))`,
+      paddingRight: columns.length > max ? NAV_WIDTH : 0,
+    },
     hasMore: columns.length > max,
     canPrev: first > 0,
     canNext: first + max < columns.length,
@@ -246,7 +288,13 @@ function TableBody({ block }: { block: BlockDto }) {
           <div className="relative flex h-9 shrink-0 border-b border-rule bg-ground text-xs font-medium text-sub">
             <div className="grid min-w-0 flex-1" style={win.template}>
               {win.visible.map((c) => (
-                <button key={c.id} type="button" onClick={() => cycleSort(c.id)} title={`${c.name} 정렬`} className={`flex min-w-0 items-center gap-1 px-3 ${c.type === 'number' ? 'justify-end' : ''}`}>
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => cycleSort(c.id)}
+                  title={`${c.name} 정렬`}
+                  className={`flex min-w-0 items-center gap-1 px-3 ${c.type === 'number' ? 'justify-end' : ''}`}
+                >
                   <span className="truncate">{c.name}</span>
                   {sort?.col === c.id && <span className="shrink-0 text-accent">{sort.dir === 'asc' ? '▲' : '▼'}</span>}
                 </button>
@@ -275,14 +323,122 @@ function TableBody({ block }: { block: BlockDto }) {
           <div className="flex h-10 shrink-0 items-center justify-between border-t border-rule pr-1 pl-2">
             <span className="flex min-w-0 items-center gap-1">
               <FooterButton icon="table" label="상세" onClick={() => open({ kind: 'table', tableId: table.id })} />
-              {table.linked && (
-                <span className={`truncate text-xs ${table.last_error ? 'text-danger' : 'text-sub'}`}>{table.last_error ? '동기화 오류' : table.last_synced_at ? `시트 ${shortWhen(table.last_synced_at)}` : '시트 연결'}</span>
-              )}
+              {table.linked && <CollectStatus table={table} />}
             </span>
-            {total > per && <PageControl from={(page - 1) * per + 1} to={Math.min(total, page * per)} total={total} onPrev={() => setPage(Math.max(1, page - 1))} onNext={() => setPage(Math.min(lastPage, page + 1))} />}
+            {total > per && (
+              <PageControl
+                from={(page - 1) * per + 1}
+                to={Math.min(total, page * per)}
+                total={total}
+                onPrev={() => setPage(Math.max(1, page - 1))}
+                onNext={() => setPage(Math.min(lastPage, page + 1))}
+              />
+            )}
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * 수합 현황(2026-11-28 UX 토론 G): 설문·시트에 이은 표는 '응답 N · 갱신 시각'과 [새로 읽기].
+ * 명단이 없으니 제출률·미제출은 짐작하지 않는다. 새로 읽기에 실패하면 이전 자료가 그대로 있다고 알린다.
+ */
+function CollectStatus({ table }: { table: TableDto }) {
+  const toast = useApp((s) => s.toast);
+  const [busy, setBusy] = useState(false);
+  const reload = async () => {
+    setBusy(true);
+    try {
+      const r = await api.post<{ status: string; message?: string }>(`/connectors/google-sheets/tables/${table.id}/sync`, { accept_structure: false });
+      if (r.status === 'synced') toast(table.form ? '설문 응답을 새로 읽었습니다' : '시트를 새로 읽었습니다');
+      else toast(`${r.message ?? '새로 읽지 못했습니다'} — 이전 자료는 그대로 있습니다`, 'error');
+    } catch (e) {
+      toast(`${errorMessage(e)} — 이전 자료는 그대로 있습니다`, 'error');
+    } finally {
+      setBusy(false);
+      void refresh('tables', 'rows', 'query');
+    }
+  };
+  return (
+    <span className="flex min-w-0 items-center gap-0.5">
+      <span title={table.last_error ?? undefined} className={`truncate text-xs ${table.last_error ? 'text-danger' : 'text-sub'}`}>
+        {table.form ? `응답 ${table.row_count}` : '시트'}
+        {table.last_error ? ' · 읽기 오류' : table.last_synced_at ? ` · ${timeLabel(table.last_synced_at)} 갱신` : ''}
+      </span>
+      <IconButton icon="refresh" label={table.form ? '응답 새로 읽기' : '시트 새로 읽기'} size={32} disabled={busy} onClick={() => void reload()} />
+    </span>
+  );
+}
+
+// ── 휴대폰: 할 일 바로 처리(2026-11-28 UX 토론 F) ─────────────────
+
+/** 휴대폰 1열 카드 안의 할 일 — 시트를 열지 않고 바로 체크하고 바로 더한다. 글자 16px, 누를 곳 44px. */
+export function PhoneTasks({ block, max = 4 }: { block: BlockDto; max?: number }) {
+  const { data: all = [], isLoading } = useTasks();
+  const open = useApp((s) => s.open);
+  const toast = useApp((s) => s.toast);
+  const list = filterTasks(all, block).filter((t) => t.status === 'open');
+  // '오늘까지'·'이번 주까지' 카드에서 더하면 오늘 마감으로 — 마감 없이 넣으면 이 카드에 안 보여 실패로 오해한다(코덱스 재검토)
+  const dated = ['today', 'week'].includes(taskFilterOf(block.config));
+  const [title, setTitle] = useState('');
+  const [saving, setSaving] = useState(false);
+  const add = async () => {
+    const t = title.trim();
+    if (!t || saving) return;
+    setSaving(true);
+    try {
+      await api.post('/tasks', { title: t.slice(0, 200), ...(dated ? { due_at: localInputToIso(`${dayKey(new Date())}T23:59`) } : {}) });
+      setTitle('');
+      await refresh('tasks');
+    } catch (e) {
+      toast(`할 일을 더하지 못했습니다: ${errorMessage(e)}`, 'error'); // 적은 글은 남겨 둔다
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="flex flex-col">
+      {list.length === 0 ? (
+        <p className="px-3 text-base leading-[44px] text-sub">{isLoading ? '불러오는 중입니다' : '남은 할 일이 없습니다'}</p>
+      ) : (
+        list.slice(0, max).map((t) => (
+          <div key={t.id} className="flex min-h-11 items-center border-b border-rule">
+            <button type="button" aria-label="완료" onClick={() => void toggleTask(t)} className="flex size-11 shrink-0 items-center justify-center">
+              <span className="flex size-6 items-center justify-center rounded-md border-2 border-field" />
+            </button>
+            <button type="button" onClick={() => open({ kind: 'task', taskId: t.id })} className="min-w-0 flex-1 truncate py-2 text-left text-base">
+              {t.title}
+            </button>
+            {t.due_at && (
+              <Tag tone={isOverdue(t) ? 'danger' : 'neutral'} className="mr-2 shrink-0">
+                {dueLabel(t.due_at)}
+              </Tag>
+            )}
+          </div>
+        ))
+      )}
+      {list.length > max && <p className="px-3 text-sm leading-9 text-sub">외 {list.length - max}건 — 제목을 누르면 모두 봅니다</p>}
+      <form
+        className="flex items-center gap-1.5 p-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void add();
+        }}
+      >
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          maxLength={200}
+          placeholder={dated ? '오늘 마감 할 일 바로 더하기' : '할 일 바로 더하기'}
+          aria-label="할 일 바로 더하기"
+          className="h-11 min-w-0 flex-1 rounded-lg border border-field bg-card px-3 text-base outline-none focus:border-accent"
+        />
+        <button type="submit" disabled={saving || !title.trim()} aria-label="더하기" className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-accent text-white disabled:opacity-40">
+          <Icon name="plus" size={20} />
+        </button>
+      </form>
     </div>
   );
 }
@@ -296,16 +452,28 @@ function MemoBody({ block }: { block: BlockDto }) {
   const latest = useRef(text);
   latest.current = text;
 
-  const save = async (value: string) => {
-    if (value === saved.current) return;
-    saved.current = value;
-    try {
-      // 글만 보낸다. 서버는 보낸 키만 바꾸므로 그사이 바뀐 종이 색을 덮어쓰지 않는다.
-      await api.patch(`/blocks/${block.id}`, { config: { text: value } });
-      queryClient.setQueryData<{ blocks: BlockDto[] }>(keys.board, (b) => b && { ...b, blocks: b.blocks.map((x) => (x.id === block.id ? { ...x, config: { ...x.config, text: value } } : x)) });
-    } catch (e) {
-      useApp.getState().toast(errorMessage(e), 'error');
-    }
+  // 저장은 한 줄로 차례차례(늦게 끝난 옛 저장이 새 글을 덮지 않게), '저장됨'은 성공한 뒤에만 적는다 — 실패하면 다음에 다시 저장한다(코덱스·제미나이 검토).
+  const chain = useRef<Promise<void>>(Promise.resolve());
+  const save = (value: string) => {
+    chain.current = chain.current.then(async () => {
+      if (value === saved.current) return;
+      try {
+        // 글만 보낸다. 서버는 보낸 키만 바꾸므로 그사이 바뀐 종이 색을 덮어쓰지 않는다.
+        await api.patch(`/blocks/${block.id}`, { config: { text: value } });
+        saved.current = value;
+        queryClient.setQueryData<{ blocks: BlockDto[] }>(
+          keys.board,
+          (b) =>
+            b && {
+              ...b,
+              blocks: b.blocks.map((x) => (x.id === block.id ? { ...x, config: { ...x.config, text: value } } : x)),
+            },
+        );
+      } catch (e) {
+        useApp.getState().toast(`메모를 저장하지 못했습니다: ${errorMessage(e)}`, 'error');
+      }
+    });
+    return chain.current;
   };
 
   // 다른 기기나 AI가 바꾼 내용은, 여기서 고치는 중이 아닐 때만 받아들인다.
@@ -326,7 +494,14 @@ function MemoBody({ block }: { block: BlockDto }) {
 
   return (
     <div data-memo={memoColor(block.config.color)} className="memo-paper flex min-h-0 flex-1 flex-col">
-      <textarea value={text} onChange={(e) => setText(e.target.value)} onBlur={() => void save(text)} maxLength={5000} placeholder="메모를 적으세요" className="min-h-0 w-full flex-1 resize-none bg-transparent px-3 py-2 text-sm leading-relaxed outline-none placeholder:text-ink/40" />
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={() => void save(text)}
+        maxLength={5000}
+        placeholder="메모를 적으세요"
+        className="min-h-0 w-full flex-1 resize-none bg-transparent px-3 py-2 text-sm leading-relaxed outline-none placeholder:text-ink/40"
+      />
     </div>
   );
 }
@@ -372,7 +547,13 @@ function ResultGrid({ result }: { result: QueryResult }) {
       </div>
       {paged && (
         <div className="flex h-10 shrink-0 items-center justify-end border-t border-rule pr-1">
-          <PageControl from={current * per + 1} to={Math.min(result.rows.length, (current + 1) * per)} total={result.rows.length} onPrev={() => setPage(Math.max(0, current - 1))} onNext={() => setPage(Math.min(pages - 1, current + 1))} />
+          <PageControl
+            from={current * per + 1}
+            to={Math.min(result.rows.length, (current + 1) * per)}
+            total={result.rows.length}
+            onPrev={() => setPage(Math.max(0, current - 1))}
+            onNext={() => setPage(Math.min(pages - 1, current + 1))}
+          />
         </div>
       )}
     </div>
@@ -421,11 +602,11 @@ function AiResultBody({ block, full }: { block: BlockDto; full?: boolean }) {
 export function BlockBody({ block, full }: { block: BlockDto; full?: boolean }) {
   switch (block.type) {
     case 'tasks':
-      return <TasksBody />;
+      return <TasksBody block={block} />;
     case 'events':
-      return <EventsBody />;
+      return <EventsBody block={block} />;
     case 'notifications':
-      return <NotificationsBody />;
+      return <NotificationsBody block={block} />;
     case 'table':
       return <TableBody block={block} />;
     case 'memo':
@@ -447,57 +628,98 @@ export interface BlockSummary {
   lines: string[];
 }
 
-function useTasksSummary(): BlockSummary {
+function useTasksSummary(block: BlockDto): BlockSummary {
   const { data = [] } = useTasks();
-  const openTasks = data.filter((t) => t.status === 'open');
-  return { count: openTasks.length, alert: false, lines: openTasks.map((t) => t.title) };
+  const openTasks = filterTasks(data, block).filter((t) => t.status === 'open');
+  return {
+    count: openTasks.length,
+    alert: false,
+    lines: openTasks.map((t) => t.title),
+  };
 }
-function useEventsSummary(): BlockSummary {
+function useEventsSummary(block: BlockDto): BlockSummary {
   const { data = [] } = useEvents();
-  return { count: data.filter(isToday).length, alert: false, lines: data.map((e) => `${eventWhen(e)} ${e.title}`) };
+  const shown = filterEvents(data, block);
+  return {
+    count: shown.filter(isToday).length,
+    alert: false,
+    lines: shown.map((e) => `${eventWhen(e)} ${e.title}`),
+  };
 }
-function useNotificationsSummary(): BlockSummary {
+function useNotificationsSummary(block: BlockDto): BlockSummary {
   const { data = [] } = useNotifications();
   const unread = data.filter((n) => n.status === 'unread');
-  return { count: unread.length, alert: true, lines: (unread.length > 0 ? unread : data).map((n) => n.title) };
+  return {
+    count: unread.length,
+    alert: true,
+    lines: (unread.length > 0 ? unread : filterNotis(data, block)).map((n) => n.title),
+  };
 }
 function useTableSummary(block: BlockDto): BlockSummary {
   const { table } = useTable(block.source_table_id);
   const { data } = useRows(table?.id, 1, 3);
   const cols = table?.schema.columns.slice(0, 2) ?? [];
-  return { count: table ? (data?.total ?? table.row_count) : null, alert: false, lines: (data?.rows ?? []).map((r) => cols.map((c) => cellText(r.values[c.id], c.type)).filter(Boolean).join(' · ')) };
+  return {
+    count: table ? (data?.total ?? table.row_count) : null,
+    alert: false,
+    lines: (data?.rows ?? []).map((r) =>
+      cols
+        .map((c) => cellText(r.values[c.id], c.type))
+        .filter(Boolean)
+        .join(' · '),
+    ),
+  };
 }
 function useTextSummary(block: BlockDto): BlockSummary {
   const hasQuery = !!block.config.query && !!block.source_table_id;
   const { data } = useQueryResult(hasQuery ? block.source_table_id : null, block.config.query);
   if (hasQuery) {
-    return { count: data ? data.rows.length : null, alert: false, lines: (data?.rows ?? []).map((row) => row.map((v, i) => cellText(v, data!.columns[i]?.type ?? 'text')).join(' · ')) };
+    return {
+      count: data ? data.rows.length : null,
+      alert: false,
+      lines: (data?.rows ?? []).map((row) => row.map((v, i) => cellText(v, data!.columns[i]?.type ?? 'text')).join(' · ')),
+    };
   }
   const text = typeof block.config.text === 'string' ? block.config.text : '';
-  return { count: null, alert: false, lines: text.split('\n').map((l) => l.trim()).filter(Boolean) };
+  return {
+    count: null,
+    alert: false,
+    lines: text
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean),
+  };
 }
 
 function SummaryOf({ block, children }: { block: BlockDto; children: (s: BlockSummary) => ReactNode }) {
   switch (block.type) {
     case 'tasks':
-      return <TasksSummary>{children}</TasksSummary>;
+      return <TasksSummary block={block}>{children}</TasksSummary>;
     case 'events':
-      return <EventsSummary>{children}</EventsSummary>;
+      return <EventsSummary block={block}>{children}</EventsSummary>;
     case 'notifications':
-      return <NotificationsSummary>{children}</NotificationsSummary>;
+      return <NotificationsSummary block={block}>{children}</NotificationsSummary>;
     case 'table':
       return <TableSummary block={block}>{children}</TableSummary>;
     case 'view':
       // 그려서 보여 주는 블록이라 줄로 줄일 내용이 없다. 휴대폰 타일에는 여는 법만 적는다.
-      return <>{children({ count: null, alert: false, lines: ['눌러서 화면을 봅니다'] })}</>;
+      return (
+        <>
+          {children({
+            count: null,
+            alert: false,
+            lines: ['눌러서 화면을 봅니다'],
+          })}
+        </>
+      );
     default:
       return <TextSummary block={block}>{children}</TextSummary>;
   }
 }
 type Render = { children: (s: BlockSummary) => ReactNode };
-const TasksSummary = ({ children }: Render) => <>{children(useTasksSummary())}</>;
-const EventsSummary = ({ children }: Render) => <>{children(useEventsSummary())}</>;
-const NotificationsSummary = ({ children }: Render) => <>{children(useNotificationsSummary())}</>;
+const TasksSummary = ({ block, children }: Render & { block: BlockDto }) => <>{children(useTasksSummary(block))}</>;
+const EventsSummary = ({ block, children }: Render & { block: BlockDto }) => <>{children(useEventsSummary(block))}</>;
+const NotificationsSummary = ({ block, children }: Render & { block: BlockDto }) => <>{children(useNotificationsSummary(block))}</>;
 const TableSummary = ({ block, children }: Render & { block: BlockDto }) => <>{children(useTableSummary(block))}</>;
 const TextSummary = ({ block, children }: Render & { block: BlockDto }) => <>{children(useTextSummary(block))}</>;
 
@@ -507,23 +729,27 @@ export function BlockCount({ block }: { block: BlockDto }) {
 }
 
 /** 휴대폰 타일의 내용: 3줄과 "외 N건". */
-export function TileLines({ block, max = 3 }: { block: BlockDto; max?: number }) {
+export function TileLines({ block, max = 3, big }: { block: BlockDto; max?: number; big?: boolean }) {
+  const line = big ? 'truncate text-base leading-9' : 'truncate text-sm leading-7';
   return (
     <SummaryOf block={block}>
       {(s) => (
         <>
           <div className="min-h-0 flex-1 overflow-hidden px-3">
             {s.lines.length === 0 ? (
-              <p className="truncate text-sm leading-7 text-sub">비어 있습니다</p>
+              <p className={`${line} text-sub`}>비어 있습니다</p>
             ) : (
-              s.lines.slice(0, max).map((line, i) => (
-                <p key={i} className="truncate text-sm leading-7">
-                  {line}
+              s.lines.slice(0, max).map((text, i) => (
+                <p key={i} className={line}>
+                  {text}
                 </p>
               ))
             )}
           </div>
-          <p className="h-8 shrink-0 truncate px-3 text-xs leading-8 text-sub">{s.lines.length > max ? `외 ${s.lines.length - max}건` : s.count !== null ? `${s.count}건` : ' '}</p>
+          {/* 휴대폰 1열 카드는 머리줄에 건수가 있으니 넘칠 때만 */}
+          {(!big || s.lines.length > max) && (
+            <p className="h-8 shrink-0 truncate px-3 text-xs leading-8 text-sub">{s.lines.length > max ? `외 ${s.lines.length - max}건` : s.count !== null ? `${s.count}건` : ' '}</p>
+          )}
         </>
       )}
     </SummaryOf>

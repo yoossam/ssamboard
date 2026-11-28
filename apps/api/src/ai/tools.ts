@@ -1,4 +1,4 @@
-import { BLOCK_TYPES, COLUMN_TYPES, FORM_QUESTION_TYPES, MEMO_COLORS, PLACE_HINTS, TITLE_COLORS } from '@jarvis/shared';
+import { BLOCK_TYPES, COLUMN_TYPES, EVENT_DAYS, FORM_QUESTION_TYPES, MEMO_COLORS, MENU_ACTION_TYPES, MENU_ICONS, MENU_PANELS, NOTI_SHOWS, PLACE_HINTS, SHARE_DAYS, TASK_FILTERS, TITLE_COLORS } from '@jarvis/shared';
 import type { LlmTool } from '../llm/adapter';
 
 // AI가 쓸 수 있는 도구(ONE-3). 읽기 도구는 바로 실행하고, 쓰기 도구는 실행하지 않고 변경 계획에 담는다(ONE-5).
@@ -68,6 +68,44 @@ export const READ_TOOLS: LlmTool[] = [
   },
 ];
 
+// 말로 관리(2026-11-28 선생님 "AI 로 쉽게 정리·관리·보기"): 메뉴·공유 링크를 읽고, 화면을 연다.
+READ_TOOLS.push(
+  {
+    name: 'list_menus',
+    description: '보드 위쪽 바로가기 줄의 "내 메뉴" 목록(id, 순서, 이름, 아이콘, 동작)을 돌려준다. 메뉴를 고치거나 지우기 전에 id 를 확인할 때 쓴다.',
+    input_schema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'list_shares',
+    description: '만든 공유 링크(로그인 없이 보는 읽기 전용 링크) 목록(id, 블록, 제목, 주소, 꺼짐·기간)을 돌려준다.',
+    input_schema: { type: 'object', properties: { block_id: { type: 'string' } } },
+  },
+  {
+    name: 'open_screen',
+    description:
+      '사용자 화면에서 창을 바로 연다(바꾸는 것이 없어 승인이 필요 없다). "출석부 열어 줘", "휴지통 보여 줘", "설정 열어 줘"처럼 화면을 열어 달라고 할 때 쓴다. ' +
+      `target: ${MENU_PANELS.join(', ')}(앱 화면), table(표 하나 — id 는 list_tables), block(블록을 크게 — id 는 get_board), share(블록의 공유 링크 창 — id 는 블록 id).`,
+    input_schema: { type: 'object', properties: { target: { type: 'string', enum: [...MENU_PANELS, 'table', 'block', 'share'] }, id: { type: 'string' } }, required: ['target'] },
+  },
+);
+
+const menuDraft = {
+  label: { type: 'string', description: '메뉴 이름(16자 이내)' },
+  icon: { type: 'string', enum: [...MENU_ICONS] },
+  description: { type: 'string', description: '누르면 무엇이 되는지 한 문장' },
+  action_type: { type: 'string', enum: [...MENU_ACTION_TYPES], description: 'ask_ai(AI 에게 정해 둔 말 보내기), open_table(표 열기), add_row(표에 한 줄 넣기), link(https 주소), open_panel(앱 화면)' },
+  prompt: { type: 'string', description: 'ask_ai 일 때 보낼 말' },
+  url: { type: 'string', description: 'link 일 때 https 주소' },
+  panel: { type: 'string', enum: [...MENU_PANELS], description: 'open_panel 일 때' },
+  table_id: { type: 'string', description: 'open_table·add_row 에서 기존 표(list_tables)' },
+  new_table: {
+    type: 'object',
+    description: 'open_table·add_row 에서 표가 없으면 새로 만들 표',
+    properties: { name: { type: 'string' }, columns: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, type: { type: 'string', enum: COLUMN_TYPES } }, required: ['name', 'type'] } } },
+    required: ['name', 'columns'],
+  },
+};
+
 export const WRITE_TOOLS: LlmTool[] = [
   {
     name: 'add_task',
@@ -120,11 +158,24 @@ export const WRITE_TOOLS: LlmTool[] = [
   {
     name: 'update_block',
     description:
-      '블록의 제목을 바꾸거나, 고정하거나(pinned), 다른 모서리로 옮기거나(position), 바탕색(color — 메모는 종이 색, 다른 블록은 바탕)이나 제목 글자색(title_color)을 바꾸거나, ' +
+      '블록의 제목을 바꾸거나, 할 일·일정·알림 블록의 보여 줄 내용(task_filter·event_days·noti_show)을 바꾸거나, 고정하거나(pinned), 다른 모서리로 옮기거나(position), 바탕색(color — 메모는 종이 색, 다른 블록은 바탕)이나 제목 글자색(title_color)을 바꾸거나, ' +
       '화면 블록의 그리기 코드(code)·꾸밈(css, 각각 고친 전체를 준다)이나 받을 자료(data)를 바꾸는 단계를 계획에 담는다. id는 get_board로 확인한다.',
     input_schema: {
       type: 'object',
-      properties: { id: { type: 'string' }, title: { type: 'string' }, pinned: { type: 'boolean' }, color: memoColor, title_color: { type: 'string', enum: [...TITLE_COLORS] }, code: viewCode, css: viewCss, data: viewData, position },
+      properties: {
+        id: { type: 'string' },
+        title: { type: 'string' },
+        pinned: { type: 'boolean' },
+        color: memoColor,
+        title_color: { type: 'string', enum: [...TITLE_COLORS] },
+        code: viewCode,
+        css: viewCss,
+        data: viewData,
+        position,
+        task_filter: { type: 'string', enum: [...TASK_FILTERS], description: '할 일 블록에 보여 줄 할 일: all 전부, open 안 끝난 것만, today 오늘까지 마감, week 이번 주까지 마감' },
+        event_days: { type: 'integer', enum: [...EVENT_DAYS], description: '일정 블록에 보여 줄 기간(오늘부터 며칠)' },
+        noti_show: { type: 'string', enum: [...NOTI_SHOWS], description: '알림 블록: all 전부, unread 안 읽은 것만' },
+      },
       required: ['id'],
     },
   },
@@ -195,6 +246,69 @@ export const WRITE_TOOLS: LlmTool[] = [
     description: '알림을 읽음(read) 또는 보관(archived)으로 바꾸는 단계를 계획에 담는다. id는 list_notifications로 확인한다.',
     input_schema: { type: 'object', properties: { ids: { type: 'array', items: { type: 'string' } }, status: { type: 'string', enum: ['read', 'archived'] } }, required: ['ids', 'status'] },
   },
+  {
+    name: 'create_menu',
+    description:
+      '보드 위쪽 바로가기 줄에 "내 메뉴"를 하나 더하는 단계를 계획에 담는다. 메뉴는 정해진 동작 하나만 한다(action_type). ' +
+      '자주 시키는 일은 ask_ai, 기록·명단·제출 현황처럼 한 줄씩 적는 일은 add_row, 보는 표는 open_table, 사이트는 link, 앱 화면은 open_panel. ' +
+      '표가 필요한데 없으면 new_table 로 칸 구성까지 정한다(이미 있으면 table_id). 메뉴는 12개까지다.',
+    input_schema: { type: 'object', properties: menuDraft, required: ['label', 'icon', 'action_type'] },
+  },
+  {
+    name: 'update_menu',
+    description: '내 메뉴의 이름·아이콘·설명을 바꾸거나 순서(index, 0 이 맨 앞)를 옮기는 단계를 계획에 담는다. id 는 list_menus 로 확인한다. 동작을 바꾸려면 지우고 새로 만든다.',
+    input_schema: { type: 'object', properties: { id: { type: 'string' }, label: { type: 'string' }, icon: { type: 'string', enum: [...MENU_ICONS] }, description: { type: 'string' }, index: { type: 'integer' } }, required: ['id'] },
+  },
+  {
+    name: 'delete_menu',
+    description: '내 메뉴를 지우는 단계를 계획에 담는다(메뉴가 쓰던 표는 그대로). 사용자가 분명히 지워 달라고 했을 때만 쓴다.',
+    input_schema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+  },
+  {
+    name: 'create_share',
+    description:
+      '블록 하나를 로그인 없이 보는 읽기 전용 공유 링크로 만드는 단계를 계획에 담는다(할 일·일정·표·메모·AI 결과 블록만). 승인하면 링크가 생기고 결과에 주소가 나온다. ' +
+      '학부모·바깥 사람에게 보여 줄 것이라 개인정보 칸(전화·주소 등)은 hide_columns 에 칸 이름으로 넣어 숨기기를 권한다. days 는 기간(0 은 기간 없음).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        block_id: { type: 'string' },
+        title: { type: 'string', description: '받는 사람에게 보일 제목' },
+        days: { type: 'integer', enum: [...SHARE_DAYS] },
+        hide_columns: { type: 'array', items: { type: 'string' }, description: '숨길 칸 이름(표 블록)' },
+      },
+      required: ['block_id'],
+    },
+  },
+  {
+    name: 'edit_file',
+    description:
+      '붙인 엑셀(.xlsx)·한글(.hwpx) 파일을 고치는 단계를 계획에 담는다. 원본은 그대로 두고, 승인하면 고친 새 파일을 내려받는다. file_id 는 <attached_file … file_id> 의 값. ' +
+      '엑셀 edits: {op:"set", sheet?, cell:"C3", value} 값 넣기 · {op:"formula", sheet?, cell, formula:"SUM(B2:C2)"} 수식(합계·평균은 이것으로) · {op:"append_row", sheet?, values:[…]} 줄 더하기 · ' +
+      '{op:"highlight", sheet?, range:"A2:D2", color: yellow|red|green|blue|orange|gray|none} 바탕색 · {op:"bold", sheet?, range} 굵게. sheet 를 주지 않으면 첫 시트. ' +
+      '한글 edits: {op:"set_text", p:12, text:"…"} 그 문단의 글을 통째로 바꾸기(빈 칸 채우기) · {op:"replace", find:"11월 30일", replace:"12월 5일"} 문서 전체에서 찾아 바꾸기. 글자만 바뀌고 서식은 그대로다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        file_id: { type: 'string' },
+        edits: { type: 'array', items: { type: 'object' } },
+        summary: { type: 'string', description: '무엇을 고쳤는지 한 문장(사용자에게 보임)' },
+      },
+      required: ['file_id', 'edits'],
+    },
+  },
+  {
+    name: 'remember',
+    description:
+      '오래 가는 기억에 짧은 한 문장을 넣는 단계를 계획에 담는다(승인하면 다음 대화부터 늘 함께 보인다). 사용자에 대한 사실·선호·자주 쓰는 형식만(예: "5학년 3반 담임", "학부모 문자는 존댓말로 세 줄 이내"). ' +
+      '학생 개인정보·비밀번호·열쇠는 넣지 않는다.',
+    input_schema: { type: 'object', properties: { text: { type: 'string', description: '300자 이내 한 문장' } }, required: ['text'] },
+  },
+  {
+    name: 'forget',
+    description: '오래 가는 기억 하나를 지우는 단계를 계획에 담는다. id 는 안내문 끝 "기억" 목록의 [id].',
+    input_schema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+  },
 ];
 
 export const WRITE_TOOL_NAMES = new Set(WRITE_TOOLS.map((t) => t.name));
@@ -219,4 +333,14 @@ export const TOOL_LABEL: Record<string, string> = {
   create_form: '설문 만들기',
   add_rows: '행 추가',
   mark_notifications: '알림 정리',
+  list_menus: '메뉴 확인',
+  list_shares: '공유 링크 확인',
+  open_screen: '화면 열기',
+  create_menu: '메뉴 만들기',
+  update_menu: '메뉴 변경',
+  delete_menu: '메뉴 삭제',
+  create_share: '공유 링크 만들기',
+  edit_file: '파일 고치기',
+  remember: '기억하기',
+  forget: '기억 지우기',
 };

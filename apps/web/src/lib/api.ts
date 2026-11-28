@@ -15,7 +15,15 @@ export function setFetcher(next: Fetcher): void {
   send = next;
 }
 
-export type AiMessageBody = { text: string; data?: string; context_block_ids?: string[]; conversation_id?: string; images?: { media_type: string; data: string }[]; files?: { name: string; data: string }[]; links?: string[] };
+export type AiMessageBody = {
+  text: string;
+  data?: string;
+  context_block_ids?: string[];
+  conversation_id?: string;
+  images?: { media_type: string; data: string }[];
+  files?: { name: string; data: string }[];
+  links?: string[];
+};
 
 export class ApiError extends Error {
   constructor(
@@ -58,14 +66,27 @@ async function request<T>(method: string, path: string, body?: unknown, signal?:
   }
   let res: Response;
   try {
-    res = await send(`/api${path}`, { method, headers, body: payload, credentials: 'same-origin', signal });
+    res = await send(`/api${path}`, {
+      method,
+      headers,
+      body: payload,
+      credentials: 'same-origin',
+      signal,
+    });
   } catch (e) {
     if ((e as Error)?.name === 'AbortError') throw e;
     throw new ApiError('서버에 연결할 수 없습니다. 네트워크를 확인하세요.', 0);
   }
   if (!res.ok) throw await failure(res);
   if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+  // 본문이 비었거나 JSON 이 아니면(프록시가 HTML 을 준 경우 등) 알아보기 쉬운 오류로(제미나이 검토)
+  const raw = await res.text();
+  if (!raw) return undefined as T;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    throw new ApiError('서버 응답을 읽지 못했습니다. 잠시 뒤 다시 시도하세요.', res.status);
+  }
 }
 
 export const api = {
@@ -86,7 +107,11 @@ export async function streamAi(body: AiMessageBody, onEvent: (event: AiStreamEve
   try {
     res = await send('/api/ai/messages', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken(), Accept: 'text/event-stream' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': csrfToken(),
+        Accept: 'text/event-stream',
+      },
       body: JSON.stringify(body),
       credentials: 'same-origin',
       signal,
@@ -116,7 +141,8 @@ export async function streamAi(body: AiMessageBody, onEvent: (event: AiStreamEve
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    buffer += decoder.decode(value, { stream: true });
+    // \r\n 줄바꿈으로 오는 경우도 같게(제미나이 검토)
+    buffer = (buffer + decoder.decode(value, { stream: true })).replace(/\r\n/g, '\n'); // 조각 경계에서 \r·\n 이 갈려도
     let cut = buffer.indexOf('\n\n');
     while (cut >= 0) {
       flush(buffer.slice(0, cut));
@@ -124,5 +150,6 @@ export async function streamAi(body: AiMessageBody, onEvent: (event: AiStreamEve
       cut = buffer.indexOf('\n\n');
     }
   }
-  if (buffer.trim()) flush(buffer);
+  buffer += decoder.decode().replace(/\r\n/g, '\n');
+  for (const chunk of buffer.split('\n\n')) if (chunk.trim()) flush(chunk);
 }

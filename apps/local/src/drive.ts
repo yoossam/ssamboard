@@ -7,7 +7,7 @@
  * - 하루 한 번 backup-YYYY-MM-DD.json 을 남기고 14개까지 둔다.
  * 열쇠(api_keys)·세션·감사 기록·로컬 상태(app_meta)는 올리지 않는다.
  */
-import { exportData as exportShared, importData as importShared, type SyncData } from '../../api/src/data/transfer';
+import { exportSnapshot, importData as importShared, type SyncData } from '../../api/src/data/transfer';
 import type { LocalDb, Queryable } from './db';
 
 // 옮기는 표·파일 모양·내보내기·가져오기는 서버 트랙과 같은 코드(apps/api/src/data/transfer.ts)를 쓴다.
@@ -26,8 +26,8 @@ async function owner(q: Queryable): Promise<string> {
 }
 
 /** 내 자료를 JSON 으로(열쇠·세션은 빠진다). */
-export async function exportData(db: Queryable): Promise<SyncData> {
-  return exportShared(db, await owner(db));
+export async function exportData(db: LocalDb): Promise<SyncData> {
+  return exportSnapshot(db, await owner(db));
 }
 
 /** 받은 자료로 이 브라우저의 내 자료를 통째로 바꾼다(한 트랜잭션, 잘못된 파일이면 그대로). 사용자 줄·열쇠는 그대로 둔다. */
@@ -94,7 +94,13 @@ export class DriveSync {
 
   private async call(url: string, init: RequestInit = {}): Promise<Response> {
     const token = await this.opts.token();
-    const res = await this.f(url, { ...init, headers: { ...(init.headers as Record<string, string>), Authorization: `Bearer ${token}` } });
+    const res = await this.f(url, {
+      ...init,
+      headers: {
+        ...(init.headers as Record<string, string>),
+        Authorization: `Bearer ${token}`,
+      },
+    });
     if (!res.ok) throw new Error(`구글 드라이브 응답 ${res.status}`);
     return res;
   }
@@ -111,11 +117,21 @@ export class DriveSync {
 
   private async upload(existing: DriveFile | null, data: SyncData): Promise<DriveFile> {
     // 내용과 표시를 한 요청으로(멀티파트) — 표시만 따로 바꾸면 그 사이에 끊길 수 있다.
-    const meta = existing ? { appProperties: { ssamRev: newRev() } } : { name: DATA_FILE, parents: ['appDataFolder'], appProperties: { ssamRev: newRev() } };
+    const meta = existing
+      ? { appProperties: { ssamRev: newRev() } }
+      : {
+          name: DATA_FILE,
+          parents: ['appDataFolder'],
+          appProperties: { ssamRev: newRev() },
+        };
     const boundary = 'ssamboard' + Math.random().toString(36).slice(2);
     const multipart = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(data)}\r\n--${boundary}--`;
     const url = existing ? `${UPLOAD}/${existing.id}?uploadType=multipart&fields=${FIELDS}` : `${UPLOAD}?uploadType=multipart&fields=${FIELDS}`;
-    const res = await this.call(url, { method: existing ? 'PATCH' : 'POST', headers: { 'Content-Type': `multipart/related; boundary=${boundary}` }, body: multipart });
+    const res = await this.call(url, {
+      method: existing ? 'PATCH' : 'POST',
+      headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+      body: multipart,
+    });
     return (await res.json()) as DriveFile;
   }
 
@@ -172,8 +188,10 @@ export class DriveSync {
    * 자료가 바뀌었다고 알린다. 조용해지면 올린다.
    * 표시는 바뀔 때마다 새 번호 — 올리는 동안 또 바뀌면 올린 뒤에도 표시가 남아 다음에 다시 올린다(검토: 저장 중 로그아웃·긴 AI 응답).
    */
+  /** 표시 쓰기가 끝나기 전에 저장·확인이 먼저 돌지 않게 기억해 둔다(제미나이 검토) */
+  private marking: Promise<unknown> = Promise.resolve();
   markDirty(): void {
-    void setMeta(this.db, 'drive_dirty', `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    this.marking = setMeta(this.db, 'drive_dirty', `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`).catch(() => undefined);
     if (this.state === 'conflict') return;
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => void this.flush().catch(() => undefined), this.opts.quietMs ?? 10_000);
@@ -185,8 +203,12 @@ export class DriveSync {
       clearTimeout(this.timer);
       this.timer = null;
     }
-    if (this.running) await this.running;
-    this.running = (async () => {
+    // 저장은 한 줄로 차례차례 — 앞 저장이 끝난(실패해도) 뒤 표시 쓰기까지 기다렸다 시작한다. 잇기는 기다림 없이 바로 해서 둘이 함께 시작하지 못한다(제미나이·코덱스 재검토)
+    const prev = this.running ?? Promise.resolve();
+    let mine!: Promise<void>;
+    mine = (async () => {
+      await prev.catch(() => undefined);
+      await this.marking;
       this.set('saving');
       try {
         const remote = await this.find(DATA_FILE);
@@ -209,10 +231,11 @@ export class DriveSync {
         this.set(navigator?.onLine === false ? 'offline' : 'error', String((e as Error).message));
         throw e;
       } finally {
-        this.running = null;
+        if (this.running === mine) this.running = null; // 뒤에 이어 둔 저장이 있으면 그 표시는 남긴다
       }
     })();
-    return this.running;
+    this.running = mine;
+    return mine;
   }
 
   /** 진행 중인 저장이 끝날 때까지 기다린다(로그아웃 전에). */
@@ -223,16 +246,22 @@ export class DriveSync {
 
   /** 아직 드라이브에 올리지 않은 변경이 있는지 */
   async hasUnsaved(): Promise<boolean> {
+    await this.marking;
     return (await meta(this.db, 'drive_dirty')) !== null;
   }
 
   /** 하루 한 번 백업 파일을 남기고 오래된 것은 지운다. */
   async backupDaily(fileId: string): Promise<void> {
-    const today = (this.opts.now?.() ?? new Date()).toISOString().slice(0, 10);
+    // 이 기기 시각의 날짜로(한국 아침 9시 전 작업이 전날 백업으로 가지 않게 — 제미나이 검토)
+    const today = new Intl.DateTimeFormat('sv-SE').format(this.opts.now?.() ?? new Date());
     if ((await meta(this.db, 'drive_backup_day')) === today) return;
     const name = `backup-${today}.json`;
     if (!(await this.find(name))) {
-      await this.call(`${API}/${fileId}/copy?fields=id`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, parents: ['appDataFolder'] }) });
+      await this.call(`${API}/${fileId}/copy?fields=id`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, parents: ['appDataFolder'] }),
+      });
     }
     const q = encodeURIComponent("name contains 'backup-' and trashed = false");
     const list = ((await (await this.call(`${API}?spaces=appDataFolder&q=${q}&fields=files(id,name)&pageSize=100`)).json()) as { files: { id: string; name: string }[] }).files;

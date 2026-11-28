@@ -1,5 +1,7 @@
 import ExcelJS from 'exceljs';
 import JSZip from 'jszip';
+import { assertZipSmall } from '../files/zip-guard';
+export { assertZipSmall } from '../files/zip-guard';
 import { extname } from 'node:path';
 import { BadRequestException, HttpException } from '@nestjs/common';
 import { bad } from '../common/http';
@@ -52,32 +54,6 @@ const xmlText = (xml: string, paragraph: RegExp, run: RegExp): string =>
     .replace(/&amp;/g, '&');
 
 /** 압축을 풀면 이보다 커지는 파일은 읽지 않는다(작은 파일이 풀면서 메모리를 다 쓰는 일을 막는다). */
-const MAX_UNZIPPED = 60 * 1024 * 1024;
-
-/**
- * 압축 파일(DOCX·HWPX·PPTX·XLSX)을 실제로 조금씩 풀어 보며 크기를 센다 — 파일이 스스로 적어 둔 크기는 믿지 않는다(2026-11-27 GPT 검토).
- * 넘으면 그 자리에서 멈춘다. 푼 조각은 쌓아 두지 않으므로 세는 동안 메모리가 늘지 않는다.
- */
-async function assertZipSmall(zip: JSZip): Promise<void> {
-  let total = 0;
-  for (const entry of Object.values(zip.files)) {
-    if (entry.dir) continue;
-    await new Promise<void>((resolve, reject) => {
-      const stream = (entry as unknown as { internalStream: (t: string) => any }).internalStream('uint8array');
-      stream
-        .on('data', (chunk: Uint8Array) => {
-          total += chunk.length;
-          if (total > MAX_UNZIPPED) {
-            stream.pause();
-            reject(new BadRequestException('파일을 풀면 너무 커서 읽지 않았습니다. PDF 로 저장해 첨부해 주세요.'));
-          }
-        })
-        .on('error', reject)
-        .on('end', () => resolve())
-        .resume();
-    });
-  }
-}
 
 async function zipText(ext: string, buffer: Buffer): Promise<string> {
   const zip = await JSZip.loadAsync(buffer);
@@ -107,19 +83,31 @@ async function xlsxText(buffer: Buffer): Promise<string> {
   for (const sheet of workbook.worksheets.slice(0, 5)) {
     out.push(`[시트: ${sheet.name}]`);
     sheet.eachRow({ includeEmpty: false }, (row) => {
-      if (out.length < 2000) out.push(Array.from(row.values as unknown[]).slice(1).map(cellText).join('\t'));
+      if (out.length < 2000)
+        out.push(
+          Array.from(row.values as unknown[])
+            .slice(1)
+            .map(cellText)
+            .join('\t'),
+        );
     });
   }
   return out.join('\n');
 }
 
 /** 요청의 첨부를 검사하고 PDF 블록과 글 자료로 나눈다. 모양이 틀리면 거절한다(조용히 빼지 않는다). */
-export async function readAttachments(files: unknown): Promise<{ pdfs: PdfBlock[]; texts: AttachedText[] }> {
-  if (files === undefined || files === null) return { pdfs: [], texts: [] };
+export async function readAttachments(files: unknown): Promise<{
+  pdfs: PdfBlock[];
+  texts: AttachedText[];
+  editable: { name: string; ext: string; buffer: Buffer }[];
+}> {
+  if (files === undefined || files === null) return { pdfs: [], texts: [], editable: [] };
   if (!Array.isArray(files)) bad('첨부 형식이 올바르지 않습니다.');
   if (files.length > MAX_FILES) bad(`파일은 한 번에 ${MAX_FILES}개까지 첨부할 수 있습니다.`);
   const pdfs: PdfBlock[] = [];
   const texts: AttachedText[] = [];
+  // 엑셀·한글(HWPX)은 AI 가 고칠 수 있게 원본을 따로 넘긴다(ai.service 가 보관하고 칸 주소·문단 번호로 보여 준다, 2026-11-28)
+  const editable: { name: string; ext: string; buffer: Buffer }[] = [];
   for (const file of files) {
     const name = typeof file?.name === 'string' ? file.name.replace(/[\r\n<>]/g, ' ').slice(0, 120) : '';
     const data = typeof file?.data === 'string' ? file.data : '';
@@ -131,23 +119,36 @@ export async function readAttachments(files: unknown): Promise<{ pdfs: PdfBlock[
     try {
       if (ext === '.pdf') {
         if (buffer.subarray(0, 5).toString('latin1') !== '%PDF-') bad(`${name}: PDF 파일이 아닙니다.`);
-        pdfs.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data }, title: name });
+        pdfs.push({
+          type: 'document',
+          source: { type: 'base64', media_type: 'application/pdf', data },
+          title: name,
+        });
       } else if (TEXT_EXT.has(ext)) texts.push({ name, text: decodeText(buffer) });
-      else if (ext === '.xlsx') texts.push({ name, text: await xlsxText(buffer) });
-      else if (ZIP_TEXT_EXT.has(ext)) texts.push({ name, text: await zipText(ext, buffer) });
+      else if (ext === '.xlsx') {
+        await xlsxText(buffer); // 크기·모양 검사(읽을 수 있는 엑셀인지)
+        editable.push({ name, ext, buffer });
+      } else if (ext === '.hwpx') {
+        await zipText(ext, buffer); // 크기·모양 검사
+        editable.push({ name, ext, buffer });
+      } else if (ZIP_TEXT_EXT.has(ext)) texts.push({ name, text: await zipText(ext, buffer) });
       else bad(`${name}: 첨부할 수 있는 파일은 이미지·PDF·한글(HWPX)·워드(DOCX)·엑셀(XLSX)·파워포인트(PPTX)·글(TXT·CSV·MD)입니다.`);
     } catch (e) {
       if (e instanceof HttpException) throw e;
       bad(`${name}: 파일을 읽지 못했습니다. 다른 형식(PDF 등)으로 저장해 다시 첨부해 주세요.`);
     }
   }
-  return { pdfs, texts };
+  return { pdfs, texts, editable };
 }
 
 // ── 구글 문서·시트·프레젠테이션 링크 ─────────────────────────────────────────────
 
 const GOOGLE_LINK_RE = /https:\/\/docs\.google\.com\/(document|spreadsheets|presentation)\/d\/([A-Za-z0-9_-]{20,100})[^\s<>"')]*/g;
-const KIND_LABEL = { document: '구글 문서', spreadsheets: '구글 시트', presentation: '구글 프레젠테이션' } as const;
+const KIND_LABEL = {
+  document: '구글 문서',
+  spreadsheets: '구글 시트',
+  presentation: '구글 프레젠테이션',
+} as const;
 export const MAX_GOOGLE_LINKS = 3;
 const MAX_LINK_BYTES = 2_000_000;
 
@@ -189,7 +190,11 @@ export async function readGoogleLink(link: GoogleLink, fetcher: typeof fetch = f
   let url = exportUrl(link);
   try {
     for (let hop = 0; hop < 4; hop++) {
-      const res = await fetcher(url, { redirect: 'manual', signal: AbortSignal.timeout(10_000), headers: { 'user-agent': 'ssamboard' } });
+      const res = await fetcher(url, {
+        redirect: 'manual',
+        signal: AbortSignal.timeout(10_000),
+        headers: { 'user-agent': 'ssamboard' },
+      });
       if (res.status >= 300 && res.status < 400) {
         const next = new URL(res.headers.get('location') ?? '', url);
         if (next.protocol !== 'https:' || !allowedHost(next.hostname)) return { ok: false, label, reason: 'not_public' };

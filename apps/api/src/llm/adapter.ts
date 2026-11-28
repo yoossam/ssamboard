@@ -39,6 +39,8 @@ export interface LlmStreamRequest {
   apiKey: string;
   model: string;
   system: string;
+  /** 매번 바뀌는 안내(지금 시각 등). system 은 캐시해 두고(같은 앞부분은 할인) 이것은 그 뒤에 붙인다. */
+  systemTail?: string;
   messages: LlmMessage[];
   tools?: LlmTool[];
   maxTokens?: number;

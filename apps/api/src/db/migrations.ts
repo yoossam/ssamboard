@@ -360,4 +360,31 @@ create table shares (
 create index shares_user on shares(user_id, block_id);
 `,
   },
+  {
+    // 기억(2026-11-28 선생님 "API 를 쓰더라도 그동안의 대화 내용을 기억하게"):
+    // 대화는 이어서 열고(title·updated_at), 길어지면 앞부분을 요약해 둔다(summary·summary_until).
+    // memories 는 사용자가 승인한 오래 가는 기억 — AI 를 부를 때마다 함께 보낸다.
+    name: '008_memory',
+    sql: /* sql */ `
+alter table conversations add column title text not null default '';
+alter table conversations add column summary text not null default '';
+alter table conversations add column summary_until timestamptz;
+alter table conversations add column updated_at timestamptz not null default now();
+create table memories (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  text text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index memories_user on memories(user_id, created_at);
+`,
+  },
+  {
+    // 파일 고치기(2026-11-28): AI 창에 붙인 엑셀·한글 원본(edit_source)과 고친 결과(edit_result)도 uploads 에 — 하루 뒤 일꾼이 지운다.
+    name: '009_file_edits',
+    sql: /* sql */ `
+alter table uploads add column kind text not null default 'table';
+`,
+  },
 ];

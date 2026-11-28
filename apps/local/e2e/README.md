@@ -12,4 +12,6 @@ node apps/local/e2e/sheettest.cjs $PW $OUT    # 시트 연결(drive.file 더 받
 node apps/local/e2e/viewtest.cjs $PW $OUT     # 가져오기로 AI 화면 블록 → 그려짐·링크/그림 걸러짐·바깥 요청이 망에 안 나감
 node apps/local/e2e/offline.cjs $PW           # 인터넷 끊고 새로 고쳐도 보드가 열림
 node apps/local/e2e/menutest.cjs $PW $OUT     # 처음 안내(열쇠→고치는 법→메뉴 추천, 가짜 Claude)→고른 메뉴 만들기→위쪽 줄에서 누르기
+node apps/local/e2e/filetest.cjs $PW $OUT     # 파일 고치기(가짜 Claude): 엑셀 붙이기 → edit_file 계획 → 승인 → 내려받기 → 수식·색 확인
+node apps/local/e2e/aitools.cjs $PW $OUT      # 말로 관리(가짜 Claude): open_screen 으로 화면 열기, create_menu 계획 → 승인 → 위쪽 줄
 ```

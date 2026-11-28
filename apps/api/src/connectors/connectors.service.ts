@@ -64,10 +64,11 @@ export class ConnectorsService {
       await this.db.query(`update connectors set token_encrypted = $2, scopes = $3, status = 'active', last_error = null where id = $1`, [existing.id, token, [DRIVE_FILE_SCOPE]]);
       return existing.id;
     }
-    const row = await this.db.one<{ id: string }>(
-      `insert into connectors(user_id, type, name, scopes, token_encrypted) values ($1, 'google_sheets', 'Google 시트', $2, $3) returning id`,
-      [userId, [DRIVE_FILE_SCOPE], token],
-    );
+    const row = await this.db.one<{ id: string }>(`insert into connectors(user_id, type, name, scopes, token_encrypted) values ($1, 'google_sheets', 'Google 시트', $2, $3) returning id`, [
+      userId,
+      [DRIVE_FILE_SCOPE],
+      token,
+    ]);
     return row!.id;
   }
 
@@ -78,14 +79,16 @@ export class ConnectorsService {
     return this.googleToken(userId, row!.id);
   }
 
-  private async googleToken(userId: string, connectorId: string): Promise<string> {
-    const row = await this.db.one<{ token_encrypted: string | null }>(`select token_encrypted from connectors where id = $1 and user_id = $2 and type = 'google_sheets'`, [connectorId, userId]);
+  /** (트랜잭션 안에서 실패하면 '오류' 표시도 함께 되돌아간다 — 다음 시트 읽기 때 다시 표시되므로 둔다, 제미나이 재검토)
+   * q: 트랜잭션 안에서 부를 때(설문 만들기 승인) — 브라우저 안 DB 는 연결이 하나라 바깥 연결로 읽으면 서로 기다린다(코덱스 검토) */
+  private async googleToken(userId: string, connectorId: string, q: Queryable = this.db): Promise<string> {
+    const row = await q.one<{ token_encrypted: string | null }>(`select token_encrypted from connectors where id = $1 and user_id = $2 and type = 'google_sheets'`, [connectorId, userId]);
     if (!row) notFound('커넥터');
     if (!row!.token_encrypted) bad('Google 연결이 끊겼습니다. 설정의 연결에서 다시 연결하세요.');
     try {
       return await this.google.accessToken(decrypt(row!.token_encrypted!, config.masterKey));
     } catch {
-      await this.db.query(`update connectors set status = 'error', last_error = $2 where id = $1`, [connectorId, 'Google 권한이 만료됐거나 취소됐습니다. 다시 연결하세요.']);
+      await q.query(`update connectors set status = 'error', last_error = $2 where id = $1`, [connectorId, 'Google 권한이 만료됐거나 취소됐습니다. 다시 연결하세요.']);
       return bad('Google 권한이 만료됐거나 취소됐습니다. 설정의 연결에서 다시 연결하세요.');
     }
   }
@@ -96,11 +99,18 @@ export class ConnectorsService {
    */
   async pickerConfig(userId: string, connectorId: string): Promise<{ access_token: string; api_key: string; app_id: string }> {
     if (!config.google.pickerApiKey || !config.google.appId) bad('서버에 GOOGLE_PICKER_API_KEY와 GOOGLE_APP_ID가 설정돼 있지 않습니다.');
-    return { access_token: await this.googleToken(userId, connectorId), api_key: config.google.pickerApiKey, app_id: config.google.appId };
+    return {
+      access_token: await this.googleToken(userId, connectorId),
+      api_key: config.google.pickerApiKey,
+      app_id: config.google.appId,
+    };
   }
 
   private async sheetsGet<T>(token: string, path: string): Promise<T> {
-    const res = await fetch(`${SHEETS_API}/${path}`, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(30_000) });
+    const res = await fetch(`${SHEETS_API}/${path}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(30_000),
+    });
     if (!res.ok) {
       const status = res.status;
       throw new Error(status === 403 || status === 404 ? '시트에 접근할 수 없습니다. 시트를 다시 골라 주세요.' : `Google 시트 응답 오류(${status})`);
@@ -109,13 +119,24 @@ export class ConnectorsService {
   }
 
   /** 고른 스프레드시트의 이름과 탭 목록. */
-  async tabs(userId: string, connectorId: string, spreadsheetId: string): Promise<{ name: string; tabs: { title: string; rows: number; cols: number }[] }> {
+  async tabs(
+    userId: string,
+    connectorId: string,
+    spreadsheetId: string,
+  ): Promise<{
+    name: string;
+    tabs: { title: string; rows: number; cols: number }[];
+  }> {
     if (!SHEET_ID_RE.test(spreadsheetId)) bad('스프레드시트 ID가 잘못됐습니다.');
     const token = await this.googleToken(userId, connectorId);
     const meta = await this.sheetsGet<any>(token, `${spreadsheetId}?fields=properties.title,sheets.properties(title,gridProperties(rowCount,columnCount))`).catch((e) => bad(e.message));
     return {
       name: String(meta?.properties?.title ?? ''),
-      tabs: (meta?.sheets ?? []).map((s: any) => ({ title: String(s.properties?.title ?? ''), rows: s.properties?.gridProperties?.rowCount ?? 0, cols: s.properties?.gridProperties?.columnCount ?? 0 })),
+      tabs: (meta?.sheets ?? []).map((s: any) => ({
+        title: String(s.properties?.title ?? ''),
+        rows: s.properties?.gridProperties?.rowCount ?? 0,
+        cols: s.properties?.gridProperties?.columnCount ?? 0,
+      })),
     };
   }
 
@@ -135,11 +156,24 @@ export class ConnectorsService {
   }
 
   /** 가져오기·연결 전 미리보기(GSH-2). 서버가 컬럼 타입을 추정한다. */
-  async preview(userId: string, input: Pick<LinkInput, 'connector_id' | 'spreadsheet_id' | 'tab' | 'range'>): Promise<{ header: string[]; guess: ColumnType[]; sample: string[][]; total: number }> {
+  async preview(
+    userId: string,
+    input: Pick<LinkInput, 'connector_id' | 'spreadsheet_id' | 'tab' | 'range'>,
+  ): Promise<{
+    header: string[];
+    guess: ColumnType[];
+    sample: string[][];
+    total: number;
+  }> {
     const ref = this.checkRef(input);
     const parsed = await this.readSheet(await this.googleToken(userId, input.connector_id), ref).catch((e) => bad(e.message));
     const sample = parsed.body.slice(0, 200);
-    return { header: parsed.header, guess: parsed.header.map((_, i) => inferColumnType(sample.map((r) => r[i]))), sample: parsed.body.slice(0, 20), total: parsed.body.length };
+    return {
+      header: parsed.header,
+      guess: parsed.header.map((_, i) => inferColumnType(sample.map((r) => r[i]))),
+      sample: parsed.body.slice(0, 20),
+      total: parsed.body.length,
+    };
   }
 
   private checkRef(input: Pick<LinkInput, 'spreadsheet_id' | 'tab' | 'range'>): { spreadsheet_id: string; tab: string; range: string | null } {
@@ -161,9 +195,16 @@ export class ConnectorsService {
     const columns =
       Array.isArray(input.columns) && input.columns.length === parsed.header.length
         ? input.columns
-        : parsed.header.map((name, i) => ({ name, type: inferColumnType(sample.map((r) => r[i])) }));
+        : parsed.header.map((name, i) => ({
+            name,
+            type: inferColumnType(sample.map((r) => r[i])),
+          }));
     const linked = input.mode === 'linked';
-    const sheetRef: SheetRef = { ...ref, spreadsheet_name: meta.name, header: parsed.header };
+    const sheetRef: SheetRef = {
+      ...ref,
+      spreadsheet_name: meta.name,
+      header: parsed.header,
+    };
     const result = await this.tables.create(userId, {
       name: (input.name ?? '').trim() || `${meta.name} · ${ref.tab}`,
       columns,
@@ -184,16 +225,31 @@ export class ConnectorsService {
    * 연결된 표 하나를 원본 시트에서 다시 읽는다(GSH-3).
    * 머리글이 달라졌으면 덮어쓰지 않고 알림으로 알린다(GSH-4). accept가 true면 새 구조를 받아들인다.
    */
-  async syncTable(userId: string, tableId: string, accept = false): Promise<{ status: 'synced' | 'structure_changed' | 'failed'; message?: string }> {
-    const row = await this.db.one<{ id: string; name: string; schema: { columns: Column[] }; connector_id: string | null; sheet_ref: SheetRef | null }>(
-      'select id, name, schema, connector_id, sheet_ref from data_tables where id = $1 and user_id = $2 and deleted_at is null',
-      [tableId, userId],
-    );
+  async syncTable(
+    userId: string,
+    tableId: string,
+    accept = false,
+  ): Promise<{
+    status: 'synced' | 'structure_changed' | 'failed';
+    message?: string;
+  }> {
+    const row = await this.db.one<{
+      id: string;
+      name: string;
+      schema: { columns: Column[] };
+      connector_id: string | null;
+      sheet_ref: SheetRef | null;
+    }>('select id, name, schema, connector_id, sheet_ref from data_tables where id = $1 and user_id = $2 and deleted_at is null', [tableId, userId]);
     if (!row) notFound('표');
     const table = row!;
     if (!table.connector_id || !table.sheet_ref) bad('연결된 표가 아닙니다.');
     // 설문에 이어진 표는 응답을 다시 읽는다(시트와 달리 머리글 견주기가 없다).
-    if ((table.sheet_ref as unknown as { kind?: string }).kind === 'form') return this.syncForm(userId, { ...table, connector_id: table.connector_id!, sheet_ref: table.sheet_ref as unknown as FormRef });
+    if ((table.sheet_ref as unknown as { kind?: string }).kind === 'form')
+      return this.syncForm(userId, {
+        ...table,
+        connector_id: table.connector_id!,
+        sheet_ref: table.sheet_ref as unknown as FormRef,
+      });
     const ref = table.sheet_ref!;
     const failKey = `sheet-sync:${tableId}`;
     const structureKey = `sheet-structure:${tableId}`;
@@ -273,13 +329,19 @@ export class ConnectorsService {
   async createForm(userId: string, spec: FormSpec, q: Queryable = this.db, commandId: string | null = null, f: Fetch = fetch): Promise<{ table: TableDto; form: FormRef }> {
     const connector = await this.googleConnector(userId, q);
     if (!connector) bad('Google 이 연결돼 있지 않습니다. 설정 → 연결에서 Google 을 먼저 연결하세요.');
-    const token = await this.googleToken(userId, connector!.id);
+    const token = await this.googleToken(userId, connector!.id, q);
     const made = await createGoogleForm(token, spec, f).catch((e) => bad(e.message));
     const { table } = await this.tables.create(
       userId,
       {
         name: spec.title,
-        columns: [{ name: '응답 시각', type: 'datetime' }, ...spec.questions.map((question) => ({ name: question.title.slice(0, 60), type: formColumnType(question.type) }))],
+        columns: [
+          { name: '응답 시각', type: 'datetime' },
+          ...spec.questions.map((question) => ({
+            name: question.title.slice(0, 60),
+            type: formColumnType(question.type),
+          })),
+        ],
         rawRows: [],
         origin: 'form',
         connector_id: connector!.id,
@@ -297,14 +359,28 @@ export class ConnectorsService {
       responder_uri: made.responder_uri,
       public_link: made.public_link,
       time_col_id: timeCol.id,
-      questions: made.questions.map((question, i) => ({ question_id: question.question_id, title: question.title, col_id: answerCols[i].id })),
+      questions: made.questions.map((question, i) => ({
+        question_id: question.question_id,
+        title: question.title,
+        col_id: answerCols[i].id,
+      })),
     };
     await q.query('update data_tables set sheet_ref = $2::jsonb where id = $1 and user_id = $3', [table.id, json(form), userId]);
     return { table: (await this.tables.get(userId, table.id, q))!, form };
   }
 
   /** 설문 응답을 다시 읽어 표를 채운다. 설문지에 새로 생긴 질문은 열을 더하고, 없어진 질문의 열은 남긴다. */
-  private async syncForm(userId: string, table: { id: string; name: string; schema: { columns: Column[] }; connector_id: string; sheet_ref: FormRef }, f: Fetch = fetch): Promise<{ status: 'synced' | 'failed'; message?: string }> {
+  private async syncForm(
+    userId: string,
+    table: {
+      id: string;
+      name: string;
+      schema: { columns: Column[] };
+      connector_id: string;
+      sheet_ref: FormRef;
+    },
+    f: Fetch = fetch,
+  ): Promise<{ status: 'synced' | 'failed'; message?: string }> {
     const failKey = `form-sync:${table.id}`;
     const ref = table.sheet_ref;
     try {
@@ -315,13 +391,35 @@ export class ConnectorsService {
       const mapping = [...ref.questions];
       for (const question of questions) {
         if (known.has(question.question_id)) continue;
-        const [col] = buildColumns([{ name: (question.title || '새 질문').slice(0, 60), type: formColumnType(question.type) }], columns);
+        const [col] = buildColumns(
+          [
+            {
+              name: (question.title || '새 질문').slice(0, 60),
+              type: formColumnType(question.type),
+            },
+          ],
+          columns,
+        );
         columns = [...columns, col];
-        mapping.push({ question_id: question.question_id, title: question.title, col_id: col.id });
+        mapping.push({
+          question_id: question.question_id,
+          title: question.title,
+          col_id: col.id,
+        });
       }
       const next: FormRef = { ...ref, questions: mapping };
       await this.db.tx(async (q) => {
-        await this.tables.replaceRows(q, userId, table.id, columns, responseRows(next, columns.map((c) => c.id), responses));
+        await this.tables.replaceRows(
+          q,
+          userId,
+          table.id,
+          columns,
+          responseRows(
+            next,
+            columns.map((c) => c.id),
+            responses,
+          ),
+        );
         // updated_at 은 건드리지 않는다. 응답을 다시 읽은 것은 사용자가 고친 것이 아니어서, 설문 만들기를 되돌릴 때 막히면 안 된다.
         await q.query('update data_tables set schema = $2::jsonb, sheet_ref = $3::jsonb, last_synced_at = now(), last_error = null where id = $1', [table.id, json({ columns }), json(next)]);
         await q.query(`update connectors set last_synced_at = now(), last_error = null, status = 'active' where id = $1`, [table.connector_id]);
@@ -331,7 +429,15 @@ export class ConnectorsService {
     } catch (e: any) {
       const message = String(e?.response?.message ?? e?.message ?? '알 수 없는 오류').slice(0, 300);
       await this.db.query('update data_tables set last_error = $2, last_synced_at = now() where id = $1', [table.id, message]);
-      await this.notifications.notify(userId, { source: 'google_forms', connector_id: table.connector_id, title: `${table.name}: 설문 응답을 읽지 못했습니다`, body: message, priority: 'normal', dedupe_key: failKey, ref: { table_id: table.id } });
+      await this.notifications.notify(userId, {
+        source: 'google_forms',
+        connector_id: table.connector_id,
+        title: `${table.name}: 설문 응답을 읽지 못했습니다`,
+        body: message,
+        priority: 'normal',
+        dedupe_key: failKey,
+        ref: { table_id: table.id },
+      });
       return { status: 'failed', message };
     }
   }
@@ -370,17 +476,33 @@ export class ConnectorsService {
       `insert into connectors(user_id, type, name, scopes, token_encrypted, config) values ($1, 'webhook', $2, $3, $4, $5::jsonb) returning ${CONNECTOR_COLUMNS}`,
       [userId, name, ['알림 만들기'], encrypt(signingSecret, config.masterKey), json({ path_hash: sha256(pathSecret) })],
     );
-    return { connector: row!, url: `${config.publicUrl}/api/webhooks/${row!.id}/${pathSecret}`, signing_secret: signingSecret };
+    return {
+      connector: row!,
+      url: `${config.publicUrl}/api/webhooks/${row!.id}/${pathSecret}`,
+      signing_secret: signingSecret,
+    };
   }
 
   /** 웹훅 수신에 필요한 값을 꺼낸다. 없거나 꺼진 커넥터면 null. */
-  async webhookSecrets(connectorId: string): Promise<{ user_id: string; name: string; path_hash: string; signing_secret: string } | null> {
-    const row = await this.db.one<{ user_id: string; name: string; token_encrypted: string | null; config: { path_hash?: string } }>(
-      `select user_id, name, token_encrypted, config from connectors where id = $1 and type = 'webhook' and status = 'active'`,
-      [connectorId],
-    );
+  async webhookSecrets(connectorId: string): Promise<{
+    user_id: string;
+    name: string;
+    path_hash: string;
+    signing_secret: string;
+  } | null> {
+    const row = await this.db.one<{
+      user_id: string;
+      name: string;
+      token_encrypted: string | null;
+      config: { path_hash?: string };
+    }>(`select user_id, name, token_encrypted, config from connectors where id = $1 and type = 'webhook' and status = 'active'`, [connectorId]);
     if (!row?.token_encrypted || !row.config?.path_hash) return null;
-    return { user_id: row.user_id, name: row.name, path_hash: row.config.path_hash, signing_secret: decrypt(row.token_encrypted, config.masterKey) };
+    return {
+      user_id: row.user_id,
+      name: row.name,
+      path_hash: row.config.path_hash,
+      signing_secret: decrypt(row.token_encrypted, config.masterKey),
+    };
   }
 
   async touch(connectorId: string): Promise<void> {
@@ -391,7 +513,10 @@ export class ConnectorsService {
 
   /** 연결 해제: 토큰을 Google에서 취소한 뒤 지운다(CON-3). 연결된 표는 마지막으로 읽은 내용 그대로 일반 표가 된다. */
   async remove(userId: string, connectorId: string): Promise<boolean> {
-    const row = await this.db.one<{ type: string; token_encrypted: string | null }>('select type, token_encrypted from connectors where id = $1 and user_id = $2', [connectorId, userId]);
+    const row = await this.db.one<{
+      type: string;
+      token_encrypted: string | null;
+    }>('select type, token_encrypted from connectors where id = $1 and user_id = $2', [connectorId, userId]);
     if (!row) return false;
     if (row.type === 'google_sheets' && row.token_encrypted) {
       await this.google.revoke(decrypt(row.token_encrypted, config.masterKey)).catch(() => undefined);

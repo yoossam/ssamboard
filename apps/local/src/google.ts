@@ -47,9 +47,16 @@ function loadGis(): Promise<void> {
     const s = document.createElement('script');
     s.src = GIS_SRC;
     s.async = true;
-    s.onload = () => resolve();
+    // 응답 없이 멈추면 영영 기다리지 않게 20초에서 끊는다(제미나이 검토)
+    const timer = setTimeout(() => s.onerror?.(new Event('timeout')), 20_000);
+    s.onload = () => {
+      clearTimeout(timer);
+      resolve();
+    };
     s.onerror = () => {
+      clearTimeout(timer);
       loading = null;
+      s.remove();
       reject(new Error('구글 로그인 도구를 불러오지 못했습니다. 인터넷 연결을 확인하세요.'));
     };
     document.head.appendChild(s);
@@ -67,7 +74,9 @@ export class GoogleAccountMismatch extends Error {
 }
 
 async function userinfo(token: string): Promise<{ email: string; name: string }> {
-  const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', { headers: { Authorization: `Bearer ${token}` } });
+  const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
   if (!res.ok) throw new Error('구글 계정 정보를 읽지 못했습니다.');
   const p = (await res.json()) as { email?: string; name?: string };
   if (!p.email) throw new Error('구글 계정 이메일을 받지 못했습니다.');
@@ -90,7 +99,13 @@ export class TokenExpiredError extends Error {
 
 export class GoogleSession {
   /** 토큰은 계정(email)을 확인한 뒤에만 여기에 둔다 — 확인 전 토큰이 드라이브 맞춤에 쓰이지 않게(코덱스 재확인). */
-  private token: { value: string; expiresAt: number; scope?: string; email?: string; name?: string } | null = null;
+  private token: {
+    value: string;
+    expiresAt: number;
+    scope?: string;
+    email?: string;
+    name?: string;
+  } | null = null;
 
   constructor(private readonly clientId: string) {
     try {
@@ -107,7 +122,12 @@ export class GoogleSession {
 
   /** 지금 토큰에 그 권한이 있는지 */
   hasScope(scope: string): boolean {
-    return this.connected && String(this.token?.scope ?? '').split(' ').includes(scope);
+    return (
+      this.connected &&
+      String(this.token?.scope ?? '')
+        .split(' ')
+        .includes(scope)
+    );
   }
 
   /** 확인한 계정(토큰과 함께 저장) */
@@ -129,7 +149,10 @@ export class GoogleSession {
         callback: resolve,
         error_callback: (e) => reject(new Error(e.type === 'popup_closed' ? '구글 창을 닫았습니다.' : '구글 로그인 창을 열지 못했습니다(팝업 차단을 확인하세요).')),
       });
-      client.requestAccessToken({ prompt: this.token || hint ? '' : 'consent', login_hint: hint });
+      client.requestAccessToken({
+        prompt: this.token || hint ? '' : 'consent',
+        login_hint: hint,
+      });
     });
     if (r.error || !r.access_token) throw new Error(r.error_description || '구글 로그인을 마치지 못했습니다.');
     if (!String(r.scope ?? '').includes('drive.appdata')) throw new Error('드라이브 앱 폴더 권한에 동의해야 자료를 저장할 수 있습니다.');
@@ -145,7 +168,13 @@ export class GoogleSession {
       revoke(r.access_token);
       throw new GoogleAccountMismatch(expected, me.email);
     }
-    this.token = { value: r.access_token, expiresAt: Date.now() + (r.expires_in ?? 3600) * 1000, scope: r.scope ?? '', email: me.email.toLowerCase(), name: me.name };
+    this.token = {
+      value: r.access_token,
+      expiresAt: Date.now() + (r.expires_in ?? 3600) * 1000,
+      scope: r.scope ?? '',
+      email: me.email.toLowerCase(),
+      name: me.name,
+    };
     const granted = String(r.scope ?? '').split(' ');
     try {
       localStorage.setItem(EXTRA_KEY, JSON.stringify(extra.filter((x) => granted.includes(x))));

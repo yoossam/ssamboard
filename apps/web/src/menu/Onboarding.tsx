@@ -13,13 +13,21 @@ import { useApp } from '../lib/store';
 import { MenuRecommender } from './menu';
 
 const KEY_PAGES: Record<string, { url: string; how: string }> = {
-  anthropic: { url: 'https://console.anthropic.com/settings/keys', how: 'Claude 콘솔 → API Keys → Create Key' },
-  openai: { url: 'https://platform.openai.com/api-keys', how: 'OpenAI 플랫폼 → API keys → Create new secret key' },
+  anthropic: {
+    url: 'https://console.anthropic.com/settings/keys',
+    how: 'Claude 콘솔 → API Keys → Create Key',
+  },
+  openai: {
+    url: 'https://platform.openai.com/api-keys',
+    how: 'OpenAI 플랫폼 → API keys → Create new secret key',
+  },
 };
 
 async function finish(): Promise<void> {
   try {
     await api.put('/settings', { onboarded: true });
+  } catch (e) {
+    useApp.getState().toast(`안내를 마치지 못했습니다: ${errorMessage(e)}`, 'error');
   } finally {
     await refresh('settings');
   }
