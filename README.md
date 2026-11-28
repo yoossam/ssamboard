@@ -52,6 +52,8 @@
 
 ### 설치 (10분)
 
+> 처음이면 공개 주소의 **서버 설치판 간편 설명서**(`install.html`)를 보세요 — Claude·ChatGPT 에 붙여 넣으면 한 단계씩 설치를 도와주는 글이 있습니다.
+
 **필요한 것**: [Docker](https://docs.docker.com/get-docker/) 가 깔린 컴퓨터 한 대(맥·리눅스·윈도우 WSL), AI 를 쓰려면 [Claude API 키](https://console.anthropic.com/) 또는 [OpenAI API 키](https://platform.openai.com/).
 
 ```bash

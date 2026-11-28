@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>서버 설치판 간편 설명서 · 쌤보드</title>
+<meta name="description" content="쌤보드 서버 설치판을 내 컴퓨터에 설치하는 법 — AI(Claude·ChatGPT)에게 맡기거나 직접 3단계로." />
+<meta name="theme-color" content="#F0F0E0" />
+<link rel="icon" href="./app/icon.svg" type="image/svg+xml" />
+<!--
+  서버 설치판 간편 설명서. scripts/build-pages.mjs 가 __REPO_URL__ 을 공개 저장소 주소로 바꿔 Pages 맨 위에 둔다.
+  설치 순서(scripts/install.sh)·README 서버 트랙이 바뀌면 이 파일도 같이 고친다(AGENTS.md).
+-->
+<style>
+  @font-face { font-family: 'A2Z'; src: url('./app/fonts/a2z-400.woff2') format('woff2'); font-weight: 1 500; font-display: swap; }
+  @font-face { font-family: 'A2Z'; src: url('./app/fonts/a2z-500.woff2') format('woff2'); font-weight: 501 1000; font-display: swap; }
+  :root {
+    --ground: #f0f0e0; --card: #ffffff; --line: #dce3ce; --rule: #e9eddd; --ink: #3e481d; --sub: #5a6b2a;
+    --accent: #3e481d; --tint: rgb(62 72 29 / 0.08); --tag: #e8ebd6; --code: #f6f7ee;
+    --r-inner: 6px; --r-el: 10px; --r-card: 12px; --r-page: 24px; --ease: cubic-bezier(0.24, 1, 0.4, 1);
+  }
+  * { box-sizing: border-box; }
+  html { font-size: 18px; }
+  body { margin: 0; background: var(--ground); color: var(--ink); font-family: 'A2Z', 'Noto Sans KR', 'Apple SD Gothic Neo', system-ui, sans-serif; line-height: 1.65; word-break: keep-all; overflow-wrap: anywhere; -webkit-font-smoothing: antialiased; }
+  main { max-width: 860px; margin: 0 auto; padding: 56px 24px 56px; }
+  a { color: var(--accent); }
+  .back { font-size: 1rem; text-decoration: none; color: var(--sub); }
+  h1 { font-size: clamp(2rem, 5vw, 2.6rem); line-height: 1.2; margin: 12px 0 8px; font-weight: 600; }
+  .lead { font-size: 1.2rem; margin: 0 0 32px; color: var(--sub); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-page); padding: 28px; margin-bottom: 16px; }
+  .card h2 { font-size: 1.45rem; margin: 0 0 6px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+  .card .why { margin: 0 0 18px; color: var(--sub); font-size: 1.02rem; }
+  .label { font-size: .85rem; padding: 3px 10px; border-radius: var(--r-inner); background: var(--tag); color: var(--sub); font-weight: 400; }
+  ol.steps { list-style: none; counter-reset: s; margin: 0; padding: 0; }
+  ol.steps > li { counter-increment: s; position: relative; padding: 14px 0 14px 48px; border-top: 1px solid var(--rule); font-size: 1.1rem; }
+  ol.steps > li:first-child { border-top: 0; }
+  ol.steps > li::before { content: counter(s); position: absolute; left: 0; top: 12px; width: 32px; height: 32px; border-radius: var(--r-el); background: var(--tint); display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 1rem; }
+  ol.steps p { margin: 4px 0 0; font-size: 1rem; color: var(--sub); }
+  pre { position: relative; background: var(--code); border: 1px solid var(--line); border-radius: var(--r-card); padding: 16px 18px; margin: 10px 0 0; font: 15px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-all; color: var(--ink); }
+  .copy { position: absolute; top: 10px; right: 10px; border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 999px; padding: 4px 14px; font: inherit; font-family: 'A2Z', system-ui, sans-serif; font-size: .85rem; cursor: pointer; transition: transform 125ms var(--ease); }
+  .copy:active { transform: scale(0.97); }
+  .prompt pre { padding-top: 48px; max-height: 380px; overflow: auto; font: 16px/1.7 'A2Z', 'Noto Sans KR', system-ui, sans-serif; word-break: keep-all; }
+  .tools { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 16px; }
+  .tool { border: 1px solid var(--rule); border-radius: var(--r-card); padding: 14px 16px; font-size: 1rem; }
+  .tool b { display: block; font-size: 1.05rem; }
+  .tool span { color: var(--sub); }
+  code { background: var(--code); border: 1px solid var(--rule); padding: 0 6px; border-radius: var(--r-inner); font-size: .92em; }
+  table { width: 100%; border-collapse: collapse; font-size: 1rem; }
+  td { border-top: 1px solid var(--rule); padding: 12px 8px; vertical-align: top; }
+  tr:first-child td { border-top: 0; }
+  td:first-child { font-weight: 600; width: 38%; }
+  footer { margin-top: 40px; text-align: center; color: var(--sub); font-size: 1rem; }
+  @media (max-width: 640px) { main { padding-top: 36px; } .card { padding: 22px 18px; } .tools { grid-template-columns: 1fr; } td:first-child { width: 42%; } }
+</style>
+</head>
+<body>
+<main>
+<a class="back" href="./">← 쌤보드 첫 화면</a>
+<h1>서버 설치판 간편 설명서</h1>
+<p class="lead">내 컴퓨터에 쌤보드를 설치하는 법. <b>AI 에게 맡기면</b> 가장 쉽습니다.</p>
+
+<section class="card prompt">
+  <h2>방법 1 · AI 에게 맡기기 <span class="label">추천</span></h2>
+  <p class="why">아래 글을 복사해 Claude 나 ChatGPT 에 붙여 넣으세요. 내 컴퓨터에 맞춰 한 단계씩 알려 줍니다.</p>
+  <pre id="prompt"><button class="copy" type="button" data-copy="prompt">복사</button>쌤보드(선생님용 업무 보드) 서버 설치판을 내 컴퓨터에 설치하려고 해. 컴퓨터를 잘 모르는 사람도 따라 할 수 있게 한 번에 한 단계씩만 알려 주고, 내가 결과를 붙여 넣으면 다음 단계로 가 줘.
+
+- 저장소: __REPO_URL__
+- 설치 안내: 그 저장소 README 의 "서버 트랙" 부분
+- 내 컴퓨터: (맥 / 윈도우 중 하나를 적어 주세요)
+
+순서는 이렇게 해 줘.
+1. 먼저 내 컴퓨터에 git 과 Docker Desktop 이 있는지 확인하는 명령을 알려 줘. 없으면 설치법을 알려 줘(윈도우면 WSL 도).
+2. 저장소를 받고(git clone) 그 폴더에서 ./scripts/install.sh 를 돌리게 해 줘.
+3. 설치 스크립트가 묻는 것은 "1) 이 컴퓨터에서만" 을 고르게 해 줘.
+4. 끝나면 나오는 주소(http://localhost:3000)와 '설치 코드'로 첫 화면에서 이름·이메일·암호, PIN 6자리를 정하는 것까지 안내해 줘.
+5. 마지막으로 설정 → 일반에서 AI 모델(Claude 또는 GPT)을 고르고 API 키를 넣는 법을 알려 줘.
+
+주의: 비밀 값(.env 파일 내용, API 키, 설치 코드)은 대화에 붙여 넣지 말라고 나에게 알려 줘. 오류가 나면 오류 문장만 보고 원인과 해결을 알려 줘.</pre>
+  <div class="tools">
+    <div class="tool"><b>Claude · ChatGPT 대화창</b><span>명령을 알려 주면 내가 터미널에 붙여 넣어 실행</span></div>
+    <div class="tool"><b>Claude Code · Codex (터미널 AI)</b><span>터미널에서 열고 붙여 넣으면 AI 가 확인을 받아 직접 실행</span></div>
+  </div>
+</section>
+
+<section class="card">
+  <h2>방법 2 · 직접 하기 <span class="label">약 10분</span></h2>
+  <p class="why">필요한 것: Docker Desktop 이 깔린 컴퓨터(맥 · 윈도우는 WSL), AI 를 쓰려면 Claude 또는 OpenAI API 키.</p>
+  <ol class="steps">
+    <li><b>Docker Desktop 설치하고 켜 두기</b>
+      <p><a href="https://www.docker.com/products/docker-desktop/" rel="noreferrer">docker.com</a> 에서 받아 설치합니다. 윈도우는 <a href="https://learn.microsoft.com/ko-kr/windows/wsl/install" rel="noreferrer">WSL</a> 을 먼저 켭니다.</p></li>
+    <li><b>터미널에서 받고 설치하기</b>
+      <pre id="cmd"><button class="copy" type="button" data-copy="cmd">복사</button>git clone __REPO_URL__.git ssamboard
+cd ssamboard
+./scripts/install.sh</pre>
+      <p>무엇을 고를지 물으면 <b>1) 이 컴퓨터에서만</b>. 처음에는 몇 분 걸립니다.</p></li>
+    <li><b>주소 열고 계정 만들기</b>
+      <p>끝나면 나오는 <code>http://localhost:3000</code> 을 열고, 같이 나온 <b>설치 코드</b>와 이름 · 이메일 · 암호를 넣습니다. 이어서 보드를 여는 <b>PIN 6자리</b>를 정합니다.</p></li>
+    <li><b>AI 열쇠 넣기</b>
+      <p>메뉴 → 설정 → 일반에서 <b>AI 모델</b>(Claude · GPT)을 고르고 그 회사의 API 키를 넣습니다. 열쇠는 서버에만 암호화해 둡니다.</p></li>
+  </ol>
+</section>
+
+<section class="card">
+  <h2>막힐 때</h2>
+  <table>
+    <tr><td>docker 명령을 못 찾음</td><td>Docker Desktop 을 켜 두었는지 확인하고 터미널을 새로 엽니다.</td></tr>
+    <tr><td>3000 번을 이미 씀</td><td><code>.env</code> 에 <code>APP_PORT=3100</code> 처럼 적고 <code>./scripts/install.sh</code> 를 다시.</td></tr>
+    <tr><td>설치 코드를 잊음</td><td><code>ssamboard</code> 폴더의 <code>.env</code> 파일에서 <code>SETUP_CODE</code> 줄을 봅니다.</td></tr>
+    <tr><td>암호 · PIN 을 잊음</td><td><code>docker compose exec app jarvis set-password 이메일</code> · <code>reset-pin 이메일</code></td></tr>
+    <tr><td>새 판으로 바꾸기</td><td>폴더에서 <code>git pull</code> 뒤 <code>./scripts/install.sh</code> (자료 · 설정은 그대로)</td></tr>
+    <tr><td>끄기</td><td><code>docker compose down</code> (자료는 남습니다)</td></tr>
+  </table>
+  <p class="why" style="margin:16px 0 0">휴대폰 등 바깥에서 쓰기, 구글 시트 · 설문 연결, 백업은 <a href="__REPO_URL__#서버-트랙">저장소 설명서</a>에 있습니다. <b>.env 파일은 비밀 값이 들어 있으니 남에게 보내지 마세요.</b></p>
+</section>
+
+<footer><a href="./">쌤보드 첫 화면</a> · <a href="./guide.html">사용 안내</a> · <a href="__REPO_URL__/issues">문의</a></footer>
+</main>
+<script>
+  document.querySelectorAll('.copy').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var pre = document.getElementById(b.dataset.copy);
+      var text = Array.prototype.filter.call(pre.childNodes, function (n) { return n !== b; }).map(function (n) { return n.textContent; }).join('');
+      navigator.clipboard.writeText(text.trim()).then(function () { b.textContent = '복사했어요'; setTimeout(function () { b.textContent = '복사'; }, 1600); });
+    });
+  });
+</script>
+</body>
+</html>
