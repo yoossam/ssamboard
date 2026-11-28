@@ -108,6 +108,7 @@ export function Sheet({
   width = 520,
   tall,
   flush,
+  huge,
 }: {
   title: string;
   icon?: string;
@@ -119,6 +120,8 @@ export function Sheet({
   tall?: boolean;
   /** 안쪽 여백 없이 내용이 창을 꽉 채운다 */
   flush?: boolean;
+  /** 화면 거의 전체(긴 글 읽기·고치기 — 담당 사업 진행 기록) */
+  huge?: boolean;
 }) {
   const phone = useIsPhone();
   useEffect(() => {
@@ -139,7 +142,7 @@ export function Sheet({
         aria-modal="true"
         aria-label={title}
         style={phone ? undefined : { maxWidth: width }}
-        className={`anim-rise flex w-full flex-col overflow-hidden bg-card shadow-xl ${phone ? `rounded-t-[20px] ${tall ? 'h-[88dvh]' : 'max-h-[88dvh]'} pb-[env(safe-area-inset-bottom)]` : `rounded-2xl ${tall ? 'h-[min(680px,calc(100dvh-48px))]' : 'max-h-[calc(100dvh-48px)]'}`}`}
+        className={`anim-rise flex w-full flex-col overflow-hidden bg-card shadow-xl ${phone ? `rounded-t-[20px] ${huge ? 'h-[94dvh]' : tall ? 'h-[88dvh]' : 'max-h-[88dvh]'} pb-[env(safe-area-inset-bottom)]` : `rounded-2xl ${huge ? 'h-[calc(100dvh-48px)]' : tall ? 'h-[min(680px,calc(100dvh-48px))]' : 'max-h-[calc(100dvh-48px)]'}`}`}
       >
         {phone && <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-field" />}
         <header className="flex h-14 shrink-0 items-center gap-2 border-b border-rule pr-1.5 pl-4">
@@ -157,7 +160,14 @@ export function Sheet({
 /** 켜짐/꺼짐 단추. 항상 보이고, 켜지면 강조색·꺼지면 회색이다. */
 export function Toggle({ on, onChange, label, disabled }: { on: boolean; onChange: (on: boolean) => void; label: string; disabled?: boolean }) {
   return (
-    <button type="button" role="switch" aria-checked={on} disabled={disabled} onClick={() => onChange(!on)} className="flex h-11 w-full items-center justify-between gap-3 text-left disabled:opacity-50">
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      disabled={disabled}
+      onClick={() => onChange(!on)}
+      className="flex h-11 w-full items-center justify-between gap-3 text-left disabled:opacity-50"
+    >
       <span className="min-w-0 truncate text-sm">{label}</span>
       <span className={`relative h-6 w-11 shrink-0 rounded-full transition ${on ? 'bg-accent' : 'bg-field'}`}>
         <span className={`absolute top-0.5 size-5 rounded-full bg-white shadow transition-all ${on ? 'left-[22px]' : 'left-0.5'}`} />
@@ -209,7 +219,9 @@ export function PinField({ value, onChange, label = 'PIN 확인', autoFocus }: {
 /** 숫자 배지. 안 읽은 것은 빨강, 나머지는 회색. 점이 아니라 숫자로 보여준다. */
 export function CountBadge({ n, alert }: { n: number; alert?: boolean }) {
   return (
-    <span className={`inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-xs font-bold tabular-nums ${alert && n > 0 ? 'bg-danger text-white' : 'bg-tag text-tagink'}`}>
+    <span
+      className={`inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-xs font-bold tabular-nums ${alert && n > 0 ? 'bg-danger text-white' : 'bg-tag text-tagink'}`}
+    >
       {n > 99 ? '99+' : n}
     </span>
   );

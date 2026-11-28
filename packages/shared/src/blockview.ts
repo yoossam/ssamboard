@@ -39,3 +39,10 @@ export const taskFilterOf = (config: Record<string, unknown> | undefined): TaskF
   (TASK_FILTERS as readonly unknown[]).includes(config?.task_filter) ? (config!.task_filter as TaskFilter) : 'all';
 export const eventDaysOf = (config: Record<string, unknown> | undefined): number => ((EVENT_DAYS as readonly unknown[]).includes(config?.event_days) ? Number(config!.event_days) : DEFAULT_EVENT_DAYS);
 export const notiShowOf = (config: Record<string, unknown> | undefined): NotiShow => ((NOTI_SHOWS as readonly unknown[]).includes(config?.noti_show) ? (config!.noti_show as NotiShow) : 'all');
+
+/**
+ * 스티커로 접기(2026-11-28 선생님 "블록을 최소화해 붙여만 놓고 누르면 모달로"): 모든 블록에.
+ * 접으면 작은 크기로(제목·건수만), 펼치면 접기 전 크기(config.expanded_layout)로 돌아간다. 누르면 크게 보기 창.
+ */
+export const STICKER_SIZE = { w: 4, h: 2 } as const;
+export const isCollapsed = (config: Record<string, unknown> | undefined): boolean => config?.collapsed === true;

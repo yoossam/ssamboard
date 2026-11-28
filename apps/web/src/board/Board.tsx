@@ -14,6 +14,9 @@ import {
   type GridPos,
   BOARD_KINDS,
   BOARD_KIND_LABEL,
+  isCollapsed,
+  STICKER_SIZE,
+  DEFAULT_BLOCK_SIZE,
 } from '@jarvis/shared';
 import { BLOCK_ICON, Icon } from '../components/Icon';
 import { Button, CountBadge, Empty, IconButton, useIsPhone, useSize } from '../components/ui';
@@ -54,9 +57,9 @@ interface Item extends GridPos {
  */
 const toItems = (blocks: BlockDto[]): Item[] =>
   blocks.map((b) => {
-    const min = MIN_BLOCK_SIZE[b.type] ?? MIN_BLOCK_SIZE.tasks;
+    const min = isCollapsed(b.config) ? { w: 2, h: 1 } : (MIN_BLOCK_SIZE[b.type] ?? MIN_BLOCK_SIZE.tasks);
     // 자리 고정한 블록은 움직이지 않는다 — 다른 블록에 밀리지도 않는다(static)
-    return { i: b.id, ...b.layout_lg, minW: min.w, minH: min.h, isDraggable: !b.pinned, isResizable: !b.pinned, static: b.pinned };
+    return { i: b.id, ...b.layout_lg, minW: min.w, minH: min.h, isDraggable: !b.pinned, isResizable: !b.pinned && !isCollapsed(b.config), static: b.pinned };
   });
 const samePos = (a: GridPos, b: GridPos) => a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
 
@@ -72,6 +75,52 @@ export async function togglePin(block: BlockDto): Promise<void> {
     useApp.getState().toast(errorMessage(e), 'error');
     void refresh('board');
   }
+}
+
+/**
+ * 스티커로 접기·펼치기(모든 블록 — 2026-11-28). 접을 때 지금 크기를 기억해 두고 작게, 펼칠 때 그 크기로(지금 자리에서).
+ * 펼친 크기가 오른쪽 끝을 넘으면 안으로 당긴다. 다른 블록과 겹치면 격자가 겹친 블록을 아래로 비킨다.
+ */
+export async function toggleCollapse(block: BlockDto): Promise<void> {
+  const cur = block.layout_lg;
+  const collapsing = !isCollapsed(block.config);
+  const was = block.config.expanded_layout as GridPos | undefined;
+  const size = collapsing ? STICKER_SIZE : { w: was?.w ?? DEFAULT_BLOCK_SIZE[block.type].w, h: was?.h ?? DEFAULT_BLOCK_SIZE[block.type].h };
+  const layout_lg: GridPos = { x: Math.max(0, Math.min(cur.x, GRID_COLS - size.w)), y: cur.y, w: size.w, h: size.h };
+  const config = collapsing ? { collapsed: true, expanded_layout: cur } : { collapsed: false };
+  patchBoard((blocks) => blocks.map((b) => (b.id === block.id ? { ...b, layout_lg, config: { ...b.config, ...config } } : b)));
+  try {
+    await api.patch(`/blocks/${block.id}`, { config, layout_lg });
+  } catch (e) {
+    useApp.getState().toast(errorMessage(e), 'error');
+  } finally {
+    void refresh('board');
+  }
+}
+
+/** 접힌 블록(스티커): 아이콘·제목·건수만. 누르면 크게 보기 창, [펼치기]로 원래 크기. */
+function StickerCard({ block }: { block: BlockDto }) {
+  const open = useApp((s) => s.open);
+  const isSelected = useApp((s) => s.selected.includes(block.id));
+  const lit = useApp((s) => s.highlight.includes(block.id));
+  const memo = block.type === 'memo';
+  const bg = memo ? memoColor(block.config.color) : blockBg(block);
+  return (
+    <article
+      data-memo={memo || bg !== 'white' ? bg : undefined}
+      className={`flex h-full items-center gap-1.5 overflow-hidden rounded-xl border pr-1 pl-2 shadow-sm ${memo || bg !== 'white' ? 'memo-paper' : 'bg-card'} ${ringOf(isSelected, lit)}`}
+    >
+      <Grip block={block} />
+      <button type="button" className="no-drag flex min-w-0 flex-1 items-center gap-2 self-stretch text-left" title="눌러서 크게 보기" onClick={() => open({ kind: 'block', blockId: block.id })}>
+        <Icon name={BLOCK_ICON[block.type]} size={20} className="shrink-0 text-accent" />
+        <span data-title-color={titleColor(block.config.title_color)} className="min-w-0 truncate text-base font-bold">
+          {block.title}
+        </span>
+        <BlockCount block={block} />
+      </button>
+      <IconButton icon="expand" label="펼치기" size={32} className="no-drag" onClick={() => void toggleCollapse(block)} />
+    </article>
+  );
 }
 
 /** 업무 | 수업 보드 전환(기기마다 기억 — 교실 TV 와 휴대폰이 따로 — 2026-11-28 두 보드) */
@@ -284,6 +333,17 @@ function BlockTools({ block }: { block: BlockDto }) {
               <Icon name="pin" size={18} className={block.pinned ? 'text-accent' : 'text-sub'} />
               {block.pinned ? '자리 고정 풀기' : '자리 고정'}
             </button>
+            <button
+              type="button"
+              className={row}
+              onClick={() => {
+                close();
+                void toggleCollapse(block);
+              }}
+            >
+              <Icon name="modal" size={18} className="text-sub" />
+              스티커로 접기(누르면 크게 보기)
+            </button>
           </>
         )}
       />
@@ -416,7 +476,7 @@ function DesktopBoard({ blocks }: { blocks: BlockDto[] }) {
         >
           {blocks.map((b) => (
             <div key={b.id} data-block={b.id}>
-              {b.type === 'memo' ? <MemoCard block={b} /> : <BlockCard block={b} />}
+              {isCollapsed(b.config) ? <StickerCard block={b} /> : b.type === 'memo' ? <MemoCard block={b} /> : <BlockCard block={b} />}
             </div>
           ))}
         </GridLayout>
@@ -537,7 +597,15 @@ function PhoneBoard({ blocks }: { blocks: BlockDto[] }) {
               <BlockCount block={b} />
               <Icon name="next" size={18} className="shrink-0 text-sub" />
             </div>
-            {b.type === 'tasks' ? <PhoneTasks block={b} /> : b.type === 'menu' ? <MenuBlockBody /> : b.type === 'links' ? <LinksBody block={b} /> : <TileLines block={b} max={4} big />}
+            {isCollapsed(b.config) ? null : b.type === 'tasks' ? (
+              <PhoneTasks block={b} />
+            ) : b.type === 'menu' ? (
+              <MenuBlockBody />
+            ) : b.type === 'links' ? (
+              <LinksBody block={b} />
+            ) : (
+              <TileLines block={b} max={4} big />
+            )}
           </section>
         ))}
       </div>

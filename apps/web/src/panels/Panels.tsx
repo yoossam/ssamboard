@@ -1,3 +1,4 @@
+import { NoteText } from '../components/SafeText';
 import { TuildersPanel } from '../board/links';
 import { QuizScreen } from '../board/quiz';
 import { useState, type ReactNode, type CSSProperties } from 'react';
@@ -25,11 +26,12 @@ import {
   type NotificationDto,
   type TaskDto,
   type TrashItem,
+  isCollapsed,
 } from '@jarvis/shared';
 import { forgetLastConversation, useAi } from '../ai/AiWindow';
 import { SharePanel } from './Share';
 import { BlockBody, PriorityTag, readAll } from '../board/blocks';
-import { togglePin } from '../board/Board';
+import { togglePin, toggleCollapse } from '../board/Board';
 import { MemoColorDots } from '../board/memo';
 import { BLOCK_ICON, Icon } from '../components/Icon';
 import { Button, ButtonRow, CountBadge, Empty, Field, IconButton, inputClass, Sheet, Tag, useIsPhone } from '../components/ui';
@@ -207,11 +209,22 @@ function BlockPanel({ blockId }: { blockId: string }) {
       title={block.title}
       icon={BLOCK_ICON[block.type]}
       onClose={close}
-      width={960}
-      tall
+      width={1100}
+      huge
       flush
       footer={
         <ButtonRow>
+          {isCollapsed(block.config) && (
+            <Button
+              icon="expand"
+              onClick={() => {
+                close();
+                void toggleCollapse(block);
+              }}
+            >
+              보드에서 펼치기
+            </Button>
+          )}
           <Button icon="pin" tone={block.pinned ? 'primary' : 'ghost'} onClick={() => togglePin(block)}>
             {block.pinned ? '고정 해제' : '고정'}
           </Button>
@@ -459,7 +472,126 @@ function TaskPanel({ taskId }: { taskId?: string }) {
   if (taskId && isLoading) return null;
   const item = data?.find((t) => t.id === taskId);
   if (taskId && !item) return <Missing what="할 일" />;
-  return <ItemPanel kind="task" item={item} />;
+  // 있는 할 일은 크게(담당 사업처럼 긴 진행 기록을 읽고 고치게 — 2026-11-28 선생님), 새로 넣을 때는 작은 창
+  return item ? <TaskBig item={item} /> : <ItemPanel kind="task" />;
+}
+
+/**
+ * 할 일 크게 보기: 화면 거의 전체. 진행 기록은 [읽기](제목·목록·가로줄을 살려 보기) / [고치기](창을 채우는 글 칸).
+ * 저장해도 창은 그대로 두어 이어서 읽고 고친다. [AI 정리]는 기록을 자료로 붙여 요약·다음 할 일을 묻는다.
+ */
+function TaskBig({ item }: { item: TaskDto }) {
+  const { close, toast, openAi } = useApp.getState();
+  const [title, setTitle] = useState(item.title);
+  const [when, setWhen] = useState(isoToLocalInput(item.due_at));
+  const [note, setNote] = useState(item.note ?? '');
+  const [mode, setMode] = useState<'read' | 'edit'>(item.note ? 'read' : 'edit');
+  const [busy, setBusy] = useState(false);
+  // 마지막으로 저장한(또는 처음 연) 값과 견준다
+  const [base, setBase] = useState({ title: item.title, note: item.note ?? '', when: isoToLocalInput(item.due_at) });
+  const dirty = title !== base.title || note !== base.note || when !== base.when;
+  const save = async () => {
+    if (!title.trim()) return toast('제목을 입력하세요', 'error');
+    setBusy(true);
+    try {
+      // 서버가 다듬은 값(앞뒤 빈칸 등)으로 맞춘다 — 안 그러면 저장한 뒤에도 '저장' 이 남는다
+      const saved = await api.patch<TaskDto>(`/tasks/${item.id}`, { title: title.trim(), due_at: localInputToIso(when), note });
+      await refresh('tasks');
+      if (saved) {
+        setTitle(saved.title);
+        setNote(saved.note ?? '');
+        setWhen(isoToLocalInput(saved.due_at));
+        setBase({ title: saved.title, note: saved.note ?? '', when: isoToLocalInput(saved.due_at) });
+      }
+      toast('저장했습니다');
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const remove = async () => {
+    setBusy(true);
+    try {
+      await api.del(`/tasks/${item.id}`);
+      await refresh('tasks', 'trash');
+      toast('휴지통으로 보냈습니다');
+      close();
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const shut = () => {
+    if (dirty && !window.confirm('저장하지 않은 고침이 있습니다. 닫을까요?')) return;
+    close();
+  };
+  return (
+    <Sheet
+      title={item.title}
+      icon="tasks"
+      onClose={shut}
+      width={1100}
+      huge
+      flush
+      footer={
+        <div className="flex items-center gap-2">
+          <Button icon="trash" tone="danger" disabled={busy} onClick={remove}>
+            삭제
+          </Button>
+          <span className="flex-1" />
+          <Button icon="sparkle" disabled={busy || !note.trim()} onClick={() => openAi(`할 일 "${title.trim()}"의 진행 기록을 짧게 요약하고, 다음에 할 일을 뽑아 줘`, note.slice(0, 20000))}>
+            AI 정리
+          </Button>
+          <Button icon="save" tone="primary" disabled={busy || !dirty} onClick={save}>
+            {dirty ? '저장' : '저장됨'}
+          </Button>
+        </div>
+      }
+    >
+      <div className="flex shrink-0 flex-wrap items-end gap-2 border-b border-rule p-4">
+        <div className="min-w-[16rem] flex-1">
+          <Field label="제목">
+            <input className={`${inputClass} text-base font-bold`} value={title} maxLength={200} onChange={(e) => setTitle(e.target.value)} />
+          </Field>
+        </div>
+        <div className="w-60">
+          <Field label="마감 (비워 두면 담당 사업으로)">
+            <input className={inputClass} type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} />
+          </Field>
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-1 px-4 pt-3">
+        {(['read', 'edit'] as const).map((m) => (
+          <button key={m} type="button" onClick={() => setMode(m)} className={`h-9 rounded-full px-4 text-sm font-bold transition ${mode === m ? 'bg-accent text-white' : 'text-sub hover:bg-ground'}`}>
+            {m === 'read' ? '읽기' : '고치기'}
+          </button>
+        ))}
+        <span className="ml-auto text-xs text-sub">{note.length.toLocaleString()}자</span>
+      </div>
+      {mode === 'read' ? (
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">{note.trim() ? <NoteText text={note} className="mx-auto max-w-3xl" /> : <Empty>기록이 없습니다. [고치기]에서 적으세요</Empty>}</div>
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col p-4 pt-3">
+          <textarea
+            className={`${inputClass} min-h-0 flex-1 resize-none py-3 text-[15px] leading-relaxed`}
+            value={note}
+            maxLength={20000}
+            autoFocus
+            placeholder="진행 기록·메모를 적으세요. # 제목, - 목록, --- 가로줄을 쓰면 [읽기]에서 보기 좋게 나옵니다."
+            onChange={(e) => setNote(e.target.value)}
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+                e.preventDefault();
+                if (dirty) void save();
+              }
+            }}
+          />
+        </div>
+      )}
+    </Sheet>
+  );
 }
 function EventPanel({ eventId }: { eventId?: string }) {
   const { data, isLoading } = useEvents();

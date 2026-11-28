@@ -22,7 +22,7 @@ import { Auth, type AuthCtx } from '../auth/auth.types';
 import { bad, isoOrNull, notFound, obj, oneOf, optStr, str, uuid } from '../common/http';
 import { config } from '../config';
 import { ItemsService } from '../items/items.service';
-import { BoardsService } from './boards.service';
+import { BoardsService, checkLayout } from './boards.service';
 import { join } from 'node:path';
 import { embeddedFontCss, frameCsp, frameDocument, newNonce, VIEW_EXTRA_HEADERS, viewCsp, viewDocument } from './view-frame';
 
@@ -52,6 +52,9 @@ function checkConfig(config: Record<string, any> | undefined): Record<string, an
   if (config.noti_show !== undefined && !(NOTI_SHOWS as readonly unknown[]).includes(config.noti_show)) bad('알림 보기 방식이 잘못됐습니다.');
   if (config.code !== undefined && (typeof config.code !== 'string' || config.code.length > VIEW_CODE_MAX)) bad(`그리기 코드는 ${VIEW_CODE_MAX.toLocaleString()}자까지입니다.`);
   if (config.css !== undefined && (typeof config.css !== 'string' || config.css.length > VIEW_CSS_MAX)) bad(`꾸밈(CSS)은 ${VIEW_CSS_MAX.toLocaleString()}자까지입니다.`);
+  // 스티커로 접기: 접힘 여부와 펼칠 때 돌아갈 크기
+  if (config.collapsed !== undefined && typeof config.collapsed !== 'boolean') bad('접기 값이 잘못됐습니다.');
+  if (config.expanded_layout !== undefined) config = { ...config, expanded_layout: checkLayout(config.expanded_layout) };
   // 수업 자료 블록의 링크(https 만, 30개까지 — @jarvis/shared links.ts)
   if (config.items !== undefined) {
     const checked = checkLinkItems(config.items);
