@@ -160,6 +160,8 @@ function TopBar() {
         {!phone && <span className="min-w-0 shrink-0 truncate text-xs text-sub">{dateLabel(new Date())}</span>}
         {/* 내 메뉴(위쪽 바로가기) — 휴대폰은 아래 한 줄 */}
         {phone ? <span className="flex-1" /> : <MenuBar />}
+        {/* 할 수 있는 일(지금 보드에서 되는 일 모음) */}
+        <IconButton icon="info" label="할 수 있는 일" size={36} onClick={() => open({ kind: 'abilities' })} />
         <ResultsButton />
         <BoardStyleButton />
         <IconButton icon="more" label="더보기" size={36} onClick={() => open({ kind: 'more' })} />

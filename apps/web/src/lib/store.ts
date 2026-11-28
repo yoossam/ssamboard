@@ -22,7 +22,8 @@ export type Panel =
   | { kind: 'event'; eventId?: string }
   | { kind: 'results' }
   | { kind: 'quiz'; quizId: string }
-  | { kind: 'tuilders'; blockId: string };
+  | { kind: 'tuilders'; blockId: string }
+  | { kind: 'abilities' };
 
 export type SettingsTab = 'general' | 'menu' | 'memory' | 'security' | 'connect' | 'devices' | 'drive' | 'data';
 export type AiLayout = 'modal' | 'panel';
